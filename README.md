@@ -1,1 +1,1 @@
-openml-pytorch
+# Pytorch extension for openml python
