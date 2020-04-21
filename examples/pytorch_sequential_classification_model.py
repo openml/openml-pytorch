@@ -10,23 +10,23 @@ import torch.nn
 import torch.optim
 
 import openml
-import pytorch
-import pytorch.layers
-import pytorch.config
+import openml_pytorch
+import openml_pytorch.layers
+import openml_pytorch.config
 import logging
 
 
 ############################################################################
 # Enable logging in order to observe the progress while running the example.
 openml.config.logger.setLevel(logging.DEBUG)
-pytorch.config.logger.setLevel(logging.DEBUG)
+openml_pytorch.config.logger.setLevel(logging.DEBUG)
 ############################################################################
 
 ############################################################################
 # Define a sequential network that does the initial image reshaping
 # and normalization model.
 processing_net = torch.nn.Sequential(
-    pytorch.layers.Functional(function=torch.Tensor.reshape,
+    openml_pytorch.layers.Functional(function=torch.Tensor.reshape,
                                                 shape=(-1, 1, 28, 28)),
     torch.nn.BatchNorm2d(num_features=1)
 )
@@ -49,7 +49,7 @@ features_net = torch.nn.Sequential(
 # Define a sequential network that flattens the features and compiles the
 # results into probabilities for each digit.
 results_net = torch.nn.Sequential(
-    pytorch.layers.Functional(function=torch.Tensor.reshape,
+    openml_pytorch.layers.Functional(function=torch.Tensor.reshape,
                                                 shape=(-1, 4 * 4 * 64)),
     torch.nn.Linear(in_features=4 * 4 * 64, out_features=256),
     torch.nn.LeakyReLU(),

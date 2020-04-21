@@ -9,14 +9,14 @@ import torch.nn
 import torch.optim
 
 import openml
-import pytorch
+import openml_pytorch
 
 import logging
 
 ############################################################################
 # Enable logging in order to observe the progress while running the example.
 openml.config.logger.setLevel(logging.DEBUG)
-pytorch.config.logger.setLevel(logging.DEBUG)
+openml_pytorch.config.logger.setLevel(logging.DEBUG)
 ############################################################################
 openml.config.apikey = 'key'
 ############################################################################
