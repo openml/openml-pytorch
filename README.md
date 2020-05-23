@@ -1,4 +1,4 @@
-# Pytorch extension for openml python
+# Pytorch extension for OpenML python
 
 Pytorch extension for openml-python API.
 
