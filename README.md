@@ -1,6 +1,6 @@
 # Pytorch extension for OpenML python
 
-Pytorch extension for openml-python API.
+Pytorch extension for [openml-python API](https://github.com/openml/openml-python).
 
 #### Installation Instructions:
 
