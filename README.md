@@ -32,3 +32,4 @@ run = openml.runs.run_model_on_task(model, task, avoid_duplicate_runs=False)
 run.publish()
 print('URL for run: %s/run/%d' % (openml.config.server, run.run_id))
 ```
+Note: The input layer of the network should be compatible with OpenML data output shape. Please check examples for more information.
