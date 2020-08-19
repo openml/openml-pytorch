@@ -17,7 +17,7 @@ with open(os.path.join("README.md")) as fid:
 
 setuptools.setup(name="openml-pytorch",
                  author=" ",
-                 version ="0.0.2",
+                 version ="0.0.5",
                  author_email="",
                  maintainer="Prabhant Singh",
                  maintainer_email="prabhantsingh@gmail.com",

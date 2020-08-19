@@ -324,8 +324,8 @@ class PytorchExtension(Extension):
         pytorch_version = 'Torch_{}.'.format(torch.__version__)
         numpy_version = 'NumPy_{}.'.format(numpy.__version__)
         scipy_version = 'SciPy_{}.'.format(scipy.__version__)
-
-        return [python_version, pytorch_version, numpy_version, scipy_version]
+        pytorch_version_formatted = pytorch_version.replace('+','_')
+        return [python_version, pytorch_version_formatted, numpy_version, scipy_version]
 
     def create_setup_string(self, model: Any) -> str:
         """Create a string which can be used to reinstantiate the given model.
@@ -396,6 +396,8 @@ class PytorchExtension(Extension):
 
         torch_version = self._format_external_version('torch', torch.__version__)
         torch_version_formatted = torch_version.replace('==', '_')
+        torch_version_formatted = torch_version_formatted.replace('+', '_')
+
         flow = OpenMLFlow(name=name,
                           class_name=class_name,
                           description='Automatically created pytorch flow.',
