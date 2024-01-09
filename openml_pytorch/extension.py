@@ -103,6 +103,7 @@ class PytorchExtension(Extension):
             self.img_dir = img_dir
             self.transform = transform
             self.target_transform = target_transform
+            self.has_labels = 'encoded_labels' in annotations_df.columns
 
         def __len__(self):
             return len(self.img_labels)
@@ -110,26 +111,42 @@ class PytorchExtension(Extension):
         def __getitem__(self, idx):
             img_path = os.path.join(self.img_dir, self.img_labels.iloc[idx, 0])
             image = read_image(img_path)
-            label = self.img_labels.iloc[idx, 1]
+            # label = self.img_labels.iloc[idx, 1]
             if self.transform:
     #             image = self.transform(image)
                 image = image.float()
-            return image, label
+            if self.has_labels:
+                label = self.img_labels.iloc[idx, 1]
+                return image, label
+            else:
+                return image
          
-    def openml2pytorch_data(self, task: 'OpenMLTask') -> Any:
-        name = task.get_dataset().name
-        dataset = openml.datasets.get_dataset(name, download_data=True, download_all_files=True)
-        # df = pd.read_parquet("/content/cache/org/openml/www/datasets/{id}/dataset_{id}.pq".format(id=dataset.id))
-        df = pd.read_parquet(dataset.parquet_file)
-        label_encoder = preprocessing.LabelEncoder().fit(df[dataset.default_target_attribute])
-        df['encoded_labels'] = label_encoder.transform(df[dataset.default_target_attribute])
+    def openml2pytorch_data(self, X, y) -> Any:
+        # name = task.get_dataset().name
+        # dataset = openml.datasets.get_dataset(name, download_data=True, download_all_files=True)
+        # # df = pd.read_parquet("/content/cache/org/openml/www/datasets/{id}/dataset_{id}.pq".format(id=dataset.id))
+        # df = pd.read_parquet(dataset.parquet_file)
+        df = X
+        label_encoder = preprocessing.LabelEncoder().fit(y)
+        df['encoded_labels'] = label_encoder.transform(y)
         # label_mapping = {index: label for index, label in enumerate(label_encoder.classes_)}
         
         data = self.OpenMLImageDataset(
             annotations_df= df[['FILE_NAME', 'encoded_labels']],
-            img_dir='/content/cache/org/openml/www/datasets/{}/{}/images'.format(dataset.id,name)
+            img_dir='/home/taniya_das/.cache//openml/org/openml/www/datasets/44312/PNU_Micro/images'
             )
         return data
+    
+    def get_labels(self, task) -> Any:
+        name = task.get_dataset().name
+        dataset = openml.datasets.get_dataset(name, download_data=True, download_all_files=False)
+        df = pd.read_parquet(dataset.parquet_file)
+        label_encoder = preprocessing.LabelEncoder().fit(df[dataset.default_target_attribute])
+        df['encoded_labels'] = label_encoder.transform(df[dataset.default_target_attribute])
+        label = df['encoded_labels']
+        label_mapping = {index: label for index, label in enumerate(label_encoder.classes_)}
+        return label, label_encoder
+        
         
     ################################################################################################
     # Methods for flow serialization and de-serialization
@@ -1114,6 +1131,7 @@ class PytorchExtension(Extension):
                 criterion = criterion_gen(task)
                 optimizer = optimizer_gen(model_copy, task)
                 scheduler = scheduler_gen(optimizer, task)
+                
 
                 # if isinstance(X_train, pd.core.frame.DataFrame):
                 #     X_train = X_train.to_numpy()  
@@ -1129,16 +1147,19 @@ class PytorchExtension(Extension):
 
                 if torch.cuda.is_available():
                     criterion = criterion.cuda()
+                    pin_memory = True
+                else:
+                    pin_memory = False
 
                 #     torch_X_train = torch_X_train.cuda()
                 #     torch_y_train = torch_y_train.cuda()
 
                 # train = torch.utils.data.TensorDataset(torch_X_train, torch_y_train)
-                
-                train = self.openml2pytorch_data(task)
+               
+                train = self.openml2pytorch_data(X_train, y_train)
                 train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size,
-                                                           shuffle=True)
-
+                                                           shuffle=True, pin_memory = pin_memory)
+                
                 for epoch in range(epoch_count):
                     correct = 0
                     incorrect = 0
@@ -1177,15 +1198,33 @@ class PytorchExtension(Extension):
         # In supervised learning this returns the predictions for Y
         if isinstance(task, OpenMLSupervisedTask):
             model_copy.eval()
-
-            inputs = torch.from_numpy(X_test)
-            inputs = sanitize(inputs)
+            
+            
+            # inputs = torch.from_numpy(X_test)
+            # inputs = sanitize(inputs)
             if torch.cuda.is_available():
-                inputs = inputs.cuda()
+                pin_memory = True
+            else:
+                pin_memory = False
+                
+            test = self.OpenMLImageDataset(
+                annotations_df=X_test[['FILE_NAME']],
+                img_dir='/home/taniya_das/.cache//openml/org/openml/www/datasets/44312/PNU_Micro/images'
+                )
 
-            pred_y = model_copy(inputs)
-            pred_y = predict(pred_y, task)
-            pred_y = pred_y.cpu().detach().numpy()
+            test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,
+                                                           shuffle=False, pin_memory = pin_memory)
+            probabilities = []
+            for batch_idx, inputs in enumerate(test_loader):
+                # Perform inference on the batch
+                pred_y_batch = model_copy(inputs)
+                pred_y_batch = predict(pred_y_batch, task)
+                pred_y_batch = pred_y_batch.cpu().detach().numpy()
+
+                probabilities.append(pred_y_batch)
+            
+            # Concatenate probabilities from all batches
+            pred_y = np.concatenate(probabilities, axis=0)
         else:
             raise ValueError(task)
 
@@ -1193,21 +1232,46 @@ class PytorchExtension(Extension):
 
             try:
                 model_copy.eval()
-
-                inputs = torch.from_numpy(X_test)
-                inputs = sanitize(inputs)
+                
+                # inputs = torch.from_numpy(X_test)
+                # inputs = sanitize(inputs)
+                # if torch.cuda.is_available():
+                #     inputs = inputs.cuda()
+                
                 if torch.cuda.is_available():
-                    inputs = inputs.cuda()
+                    pin_memory = True
+                else:
+                    pin_memory = False
+                
+                test = self.OpenMLImageDataset(
+                    annotations_df=X_test[['FILE_NAME']],
+                    img_dir='/home/taniya_das/.cache//openml/org/openml/www/datasets/44312/PNU_Micro/images'
+                    )
 
-                proba_y = model_copy(inputs)
-                proba_y = predict_proba(proba_y)
-                proba_y = proba_y.cpu().detach().numpy()
-            except AttributeError:
+                test_loader = torch.utils.data.DataLoader(test, batch_size=1,
+                                                           shuffle=False, pin_memory = pin_memory)
+                breakpoint()
+                probabilities = []
+                for batch_idx, inputs in enumerate(test_loader):
+                    # Perform inference on the batch
+                    proba_y_batch = model_copy(inputs)
+                    proba_y_batch = predict_proba(proba_y_batch)
+                    proba_y_batch = proba_y_batch.cpu().detach().numpy()
+
+                    probabilities.append(proba_y_batch)
+                
+                # Concatenate probabilities from all batches
+                proba_y = np.concatenate(probabilities, axis=0)
+                
+            except AttributeError:    
                 if task.class_labels is not None:
                     proba_y = _prediction_to_probabilities(pred_y, list(task.class_labels))
                 else:
                     raise ValueError('The task has no class labels')
-
+            breakpoint()
+            if task.class_labels is None:
+                    label, label_encoder = self.get_labels(task)
+                    task.class_labels = list(label_encoder.classes_)
             if task.class_labels is not None:
                 if proba_y.shape[1] != len(task.class_labels):
                     # Remap the probabilities in case there was a class missing
