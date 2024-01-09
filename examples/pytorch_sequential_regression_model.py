@@ -18,7 +18,7 @@ import logging
 openml.config.logger.setLevel(logging.DEBUG)
 openml_pytorch.config.logger.setLevel(logging.DEBUG)
 ############################################################################
-openml.config.apikey = 'key'
+openml.config.apikey = 'd7f058387fb3c8ba41e1ae61ebd999a0'
 ############################################################################
 # Define a sequential network with 1 input layer, 3 hidden layers and 1 output
 # layer, using the LeakyReLU activation function and a dropout rate of 0.5.

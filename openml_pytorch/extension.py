@@ -35,6 +35,10 @@ from openml.tasks import (
     OpenMLRegressionTask,
 )
 
+import os 
+from torchvision.io import read_image
+from torch.utils.data import Dataset
+from sklearn import preprocessing
 
 if sys.version_info >= (3, 5):
     from json.decoder import JSONDecodeError
@@ -89,7 +93,44 @@ class PytorchExtension(Extension):
         """
         from torch.nn import Module
         return isinstance(model, Module)
+    
+    ################################################################################################
+    # Method for dataloader
+    
+    class OpenMLImageDataset(Dataset):
+        def __init__(self, annotations_df, img_dir, transform=1, target_transform=None):
+            self.img_labels = annotations_df
+            self.img_dir = img_dir
+            self.transform = transform
+            self.target_transform = target_transform
 
+        def __len__(self):
+            return len(self.img_labels)
+
+        def __getitem__(self, idx):
+            img_path = os.path.join(self.img_dir, self.img_labels.iloc[idx, 0])
+            image = read_image(img_path)
+            label = self.img_labels.iloc[idx, 1]
+            if self.transform:
+    #             image = self.transform(image)
+                image = image.float()
+            return image, label
+         
+    def openml2pytorch_data(self, task: 'OpenMLTask') -> Any:
+        name = task.get_dataset().name
+        dataset = openml.datasets.get_dataset(name, download_data=True, download_all_files=True)
+        # df = pd.read_parquet("/content/cache/org/openml/www/datasets/{id}/dataset_{id}.pq".format(id=dataset.id))
+        df = pd.read_parquet(dataset.parquet_file)
+        label_encoder = preprocessing.LabelEncoder().fit(df[dataset.default_target_attribute])
+        df['encoded_labels'] = label_encoder.transform(df[dataset.default_target_attribute])
+        # label_mapping = {index: label for index, label in enumerate(label_encoder.classes_)}
+        
+        data = self.OpenMLImageDataset(
+            annotations_df= df[['FILE_NAME', 'encoded_labels']],
+            img_dir='/content/cache/org/openml/www/datasets/{}/{}/images'.format(dataset.id,name)
+            )
+        return data
+        
     ################################################################################################
     # Methods for flow serialization and de-serialization
 
@@ -1074,18 +1115,27 @@ class PytorchExtension(Extension):
                 optimizer = optimizer_gen(model_copy, task)
                 scheduler = scheduler_gen(optimizer, task)
 
-                torch_X_train = torch.from_numpy(X_train)
-                torch_X_train = sanitize(torch_X_train)
-                torch_y_train = torch.from_numpy(y_train)
-                torch_y_train = retype_labels(torch_y_train, task)
+                # if isinstance(X_train, pd.core.frame.DataFrame):
+                #     X_train = X_train.to_numpy()  
+                
+                # if isinstance(y_train, pd.core.series.Series):
+                #     y_train = y_train.to_numpy() 
+                #     y_train = np.vstack(y_train).astype(float)   
+
+                # torch_X_train = torch.from_numpy(X_train)
+                # torch_X_train = sanitize(torch_X_train)
+                # torch_y_train = torch.from_numpy(y_train)
+                # torch_y_train = retype_labels(torch_y_train, task)
 
                 if torch.cuda.is_available():
                     criterion = criterion.cuda()
 
-                    torch_X_train = torch_X_train.cuda()
-                    torch_y_train = torch_y_train.cuda()
+                #     torch_X_train = torch_X_train.cuda()
+                #     torch_y_train = torch_y_train.cuda()
 
-                train = torch.utils.data.TensorDataset(torch_X_train, torch_y_train)
+                # train = torch.utils.data.TensorDataset(torch_X_train, torch_y_train)
+                breakpoint()
+                train = self.openml2pytorch_data(task)
                 train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size,
                                                            shuffle=True)
 
@@ -1411,3 +1461,6 @@ class PytorchExtension(Extension):
         return model
 
 
+    def check_if_model_fitted(self, model: Any):
+        
+        pass

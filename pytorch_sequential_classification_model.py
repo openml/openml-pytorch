@@ -57,7 +57,7 @@ results_net = torch.nn.Sequential(
     torch.nn.Linear(in_features=256, out_features=10),
 )
 ############################################################################
-openml.config.apikey = 'key'
+openml.config.apikey = 'd7f058387fb3c8ba41e1ae61ebd999a0'
 
 ############################################################################
 # The main network, composed of the above specified networks.
@@ -72,7 +72,7 @@ model = torch.nn.Sequential(
 # Download the OpenML task for the mnist 784 dataset.
 task = openml.tasks.get_task(3573)
 ############################################################################
-# Run the model on the task (requires an API key).
+# Run the model on the task (requires an API key).m
 run = openml.runs.run_model_on_task(model, task, avoid_duplicate_runs=False)
 # Publish the experiment on OpenML (optional, requires an API key).
 run.publish()
