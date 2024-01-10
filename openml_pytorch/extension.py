@@ -95,7 +95,7 @@ class PytorchExtension(Extension):
         return isinstance(model, Module)
     
     ################################################################################################
-    # Method for dataloader
+    # Method for dataloader 
     
     class OpenMLImageDataset(Dataset):
         def __init__(self, annotations_df, img_dir, transform=1, target_transform=None):
@@ -121,32 +121,21 @@ class PytorchExtension(Extension):
             else:
                 return image
          
-    def openml2pytorch_data(self, X, y) -> Any:
-        # name = task.get_dataset().name
-        # dataset = openml.datasets.get_dataset(name, download_data=True, download_all_files=True)
-        # # df = pd.read_parquet("/content/cache/org/openml/www/datasets/{id}/dataset_{id}.pq".format(id=dataset.id))
-        # df = pd.read_parquet(dataset.parquet_file)
+    def openml2pytorch_data(self, X, y, task) -> Any:
+        # task to get dataset id and name
+        name = task.get_dataset().name
+        dataset_id = task.dataset_id
         df = X
         label_encoder = preprocessing.LabelEncoder().fit(y)
         df['encoded_labels'] = label_encoder.transform(y)
-        # label_mapping = {index: label for index, label in enumerate(label_encoder.classes_)}
+        label_mapping = {index: label for index, label in enumerate(label_encoder.classes_)}
         
+        # ToDo: Change img_dir name to general dataset name instead of name.split('Meta_Album)
         data = self.OpenMLImageDataset(
             annotations_df= df[['FILE_NAME', 'encoded_labels']],
-            img_dir='/home/taniya_das/.cache//openml/org/openml/www/datasets/44312/PNU_Micro/images'
+            img_dir = openml.config.get_cache_directory()+'/datasets/{}/{}/images'.format(dataset_id, name.split('Meta_Album_')[1])
             )
-        return data
-    
-    def get_labels(self, task) -> Any:
-        name = task.get_dataset().name
-        dataset = openml.datasets.get_dataset(name, download_data=True, download_all_files=False)
-        df = pd.read_parquet(dataset.parquet_file)
-        label_encoder = preprocessing.LabelEncoder().fit(df[dataset.default_target_attribute])
-        df['encoded_labels'] = label_encoder.transform(df[dataset.default_target_attribute])
-        label = df['encoded_labels']
-        label_mapping = {index: label for index, label in enumerate(label_encoder.classes_)}
-        return label, label_encoder
-        
+        return data, label_mapping
         
     ################################################################################################
     # Methods for flow serialization and de-serialization
@@ -320,7 +309,6 @@ class PytorchExtension(Extension):
 
     def _serialize_pytorch(self, o: Any, parent_model: Optional[Any] = None) -> Any:
         rval = None  # type: Any
-
         if self.is_estimator(o):
             # is the main model or a submodel
             rval = self._serialize_model(o)
@@ -582,6 +570,7 @@ class PytorchExtension(Extension):
         model_parameters = dict((k, v) for (k, v) in model.named_parameters())
 
         parameters = dict()  # type: Dict[str, Any]
+        
         if not self._is_container_module(model):
             # For non-containers, we simply extract the hyperparameters.
             parameters = self._get_module_hyperparameters(model, model_parameters)
@@ -619,8 +608,8 @@ class PytorchExtension(Extension):
         sub_components_explicit = set()
         parameters = OrderedDict()  # type: OrderedDict[str, Optional[str]]
         parameters_meta_info = OrderedDict()  # type: OrderedDict[str, Optional[Dict]]
-
-        model_parameters = self._get_module_descriptors(model, deep=False)
+        
+        model_parameters = self._get_module_descriptors(model, deep=True)
         for k, v in sorted(model_parameters.items(), key=lambda t: t[0]):
             rval = self._serialize_pytorch(v, model)
 
@@ -702,6 +691,7 @@ class PytorchExtension(Extension):
                 # places where we encode a value as json to make sure that all
                 # parameter values still have the same type after
                 # deserialization
+                
                 if isinstance(rval, tuple):
                     parameter_json = json.dumps(tuple(parameter_value))
                 else:
@@ -1107,7 +1097,7 @@ class PytorchExtension(Extension):
                 raise TypeError('argument y_train must not be of type None')
             if X_test is None:
                 raise TypeError('argument X_test must not be of type None')
-
+        
         model_copy = copy.deepcopy(model)
 
         if torch.cuda.is_available():
@@ -1131,40 +1121,27 @@ class PytorchExtension(Extension):
                 criterion = criterion_gen(task)
                 optimizer = optimizer_gen(model_copy, task)
                 scheduler = scheduler_gen(optimizer, task)
-                
-
-                # if isinstance(X_train, pd.core.frame.DataFrame):
-                #     X_train = X_train.to_numpy()  
-                
-                # if isinstance(y_train, pd.core.series.Series):
-                #     y_train = y_train.to_numpy() 
-                #     y_train = np.vstack(y_train).astype(float)   
-
-                # torch_X_train = torch.from_numpy(X_train)
-                # torch_X_train = sanitize(torch_X_train)
-                # torch_y_train = torch.from_numpy(y_train)
-                # torch_y_train = retype_labels(torch_y_train, task)
+                pin_memory = False
 
                 if torch.cuda.is_available():
                     criterion = criterion.cuda()
                     pin_memory = True
-                else:
-                    pin_memory = False
-
-                #     torch_X_train = torch_X_train.cuda()
-                #     torch_y_train = torch_y_train.cuda()
-
-                # train = torch.utils.data.TensorDataset(torch_X_train, torch_y_train)
+                    
                
-                train = self.openml2pytorch_data(X_train, y_train)
+                train, label_mapping = self.openml2pytorch_data(X_train, y_train, task)
                 train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size,
                                                            shuffle=True, pin_memory = pin_memory)
                 
                 for epoch in range(epoch_count):
                     correct = 0
                     incorrect = 0
-
+                    
                     for batch_idx, (inputs, labels) in enumerate(train_loader):
+                        
+                        if torch.cuda.is_available():
+                            inputs = inputs.cuda()
+                            labels = labels.cuda()
+                            
                         def _optimizer_step():
                             optimizer.zero_grad()
                             outputs = model_copy(inputs)
@@ -1198,24 +1175,20 @@ class PytorchExtension(Extension):
         # In supervised learning this returns the predictions for Y
         if isinstance(task, OpenMLSupervisedTask):
             model_copy.eval()
-            
-            
-            # inputs = torch.from_numpy(X_test)
-            # inputs = sanitize(inputs)
-            if torch.cuda.is_available():
-                pin_memory = True
-            else:
-                pin_memory = False
                 
+            name = task.get_dataset().name
             test = self.OpenMLImageDataset(
                 annotations_df=X_test[['FILE_NAME']],
-                img_dir='/home/taniya_das/.cache//openml/org/openml/www/datasets/44312/PNU_Micro/images'
+                img_dir=openml.config.get_cache_directory()+'/datasets/{}/{}/images'.format(task.dataset_id, name.split('Meta_Album_')[1])
                 )
 
             test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,
-                                                           shuffle=False, pin_memory = pin_memory)
+                                                           shuffle=False, pin_memory = torch.cuda.is_available())
             probabilities = []
             for batch_idx, inputs in enumerate(test_loader):
+                if torch.cuda.is_available():
+                    inputs = inputs.cuda()
+                            
                 # Perform inference on the batch
                 pred_y_batch = model_copy(inputs)
                 pred_y_batch = predict(pred_y_batch, task)
@@ -1233,26 +1206,18 @@ class PytorchExtension(Extension):
             try:
                 model_copy.eval()
                 
-                # inputs = torch.from_numpy(X_test)
-                # inputs = sanitize(inputs)
-                # if torch.cuda.is_available():
-                #     inputs = inputs.cuda()
-                
-                if torch.cuda.is_available():
-                    pin_memory = True
-                else:
-                    pin_memory = False
-                
                 test = self.OpenMLImageDataset(
                     annotations_df=X_test[['FILE_NAME']],
-                    img_dir='/home/taniya_das/.cache//openml/org/openml/www/datasets/44312/PNU_Micro/images'
+                    img_dir=openml.config.get_cache_directory()+'/datasets/{}/{}/images'.format(task.dataset_id, name.split('Meta_Album_')[1])
                     )
 
-                test_loader = torch.utils.data.DataLoader(test, batch_size=1,
-                                                           shuffle=False, pin_memory = pin_memory)
-                breakpoint()
+                test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,
+                                                           shuffle=False, pin_memory = torch.cuda.is_available())
+            
                 probabilities = []
                 for batch_idx, inputs in enumerate(test_loader):
+                    if torch.cuda.is_available():
+                        inputs = inputs.cuda()
                     # Perform inference on the batch
                     proba_y_batch = model_copy(inputs)
                     proba_y_batch = predict_proba(proba_y_batch)
@@ -1268,10 +1233,10 @@ class PytorchExtension(Extension):
                     proba_y = _prediction_to_probabilities(pred_y, list(task.class_labels))
                 else:
                     raise ValueError('The task has no class labels')
-            breakpoint()
+            
             if task.class_labels is None:
-                    label, label_encoder = self.get_labels(task)
-                    task.class_labels = list(label_encoder.classes_)
+                    task.class_labels = list(label_mapping.values())
+                    
             if task.class_labels is not None:
                 if proba_y.shape[1] != len(task.class_labels):
                     # Remap the probabilities in case there was a class missing

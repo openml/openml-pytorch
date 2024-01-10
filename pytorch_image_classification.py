@@ -23,54 +23,43 @@ openml_pytorch.config.logger.setLevel(logging.DEBUG)
 ############################################################################
 
 ############################################################################
-# Define a sequential network that does the initial image reshaping
-# and normalization model.
-processing_net = torch.nn.Sequential(
-    openml_pytorch.layers.Functional(function=torch.Tensor.reshape,
-                                                shape=(-1, 1, 28, 28)),
-    torch.nn.BatchNorm2d(num_features=1)
-)
-############################################################################
+import torch.nn as nn
+import torch.nn.functional as F
 
-############################################################################
-# Define a sequential network that does the extracts the features from the
-# image.
-features_net = torch.nn.Sequential(
-    torch.nn.Conv2d(in_channels=1, out_channels=32, kernel_size=5),
-    torch.nn.LeakyReLU(),
-    torch.nn.MaxPool2d(kernel_size=2),
-    torch.nn.Conv2d(in_channels=32, out_channels=64, kernel_size=5),
-    torch.nn.LeakyReLU(),
-    torch.nn.MaxPool2d(kernel_size=2),
-)
-############################################################################
+# Example model. You can do better :)
+class Net(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 6, 5)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(6, 16, 5)
+        self.fc1 = nn.Linear(13456, 120)
+        self.fc2 = nn.Linear(120, 84)
+        self.fc3 = nn.Linear(84, 19)
 
-############################################################################
-# Define a sequential network that flattens the features and compiles the
-# results into probabilities for each digit.
-results_net = torch.nn.Sequential(
-    openml_pytorch.layers.Functional(function=torch.Tensor.reshape,
-                                                shape=(-1, 4 * 4 * 64)),
-    torch.nn.Linear(in_features=4 * 4 * 64, out_features=256),
-    torch.nn.LeakyReLU(),
-    torch.nn.Dropout(),
-    torch.nn.Linear(in_features=256, out_features=10),
-)
+    def forward(self, x):
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = torch.flatten(x, 1) # flatten all dimensions except batch
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
+net = Net()
+
 ############################################################################
 openml.config.apikey = 'key'
 
 ############################################################################
 # The main network, composed of the above specified networks.
-model = torch.nn.Sequential(
-    processing_net,
-    features_net,
-    results_net
-)
+model = net
 ############################################################################
 
 ############################################################################
-# Download the OpenML task for the mnist 784 dataset.
-task = openml.tasks.get_task(3573)
+# Download the OpenML task for the Meta_Album_PMU_Micro dataset.
+task = openml.tasks.get_task(361987)
+
 ############################################################################
 # Run the model on the task (requires an API key).m
 run = openml.runs.run_model_on_task(model, task, avoid_duplicate_runs=False)
