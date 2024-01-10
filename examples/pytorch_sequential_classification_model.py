@@ -57,7 +57,7 @@ results_net = torch.nn.Sequential(
     torch.nn.Linear(in_features=256, out_features=10),
 )
 ############################################################################
-openml.config.apikey = 'd7f058387fb3c8ba41e1ae61ebd999a0'
+openml.config.apikey = 'key'
 
 ############################################################################
 # The main network, composed of the above specified networks.
