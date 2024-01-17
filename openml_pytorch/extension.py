@@ -409,7 +409,7 @@ class PytorchExtension(Extension):
         OpenMLFlow
 
         """
-
+        
         # Get all necessary information about the model objects itself
         parameters, parameters_meta_info, subcomponents, subcomponents_explicit = \
             self._extract_information_from_model(model)
@@ -1138,6 +1138,7 @@ class PytorchExtension(Extension):
                     
                     for batch_idx, (inputs, labels) in enumerate(train_loader):
                         
+                        inputs = sanitize(inputs)
                         if torch.cuda.is_available():
                             inputs = inputs.cuda()
                             labels = labels.cuda()
@@ -1186,6 +1187,7 @@ class PytorchExtension(Extension):
                                                            shuffle=False, pin_memory = torch.cuda.is_available())
             probabilities = []
             for batch_idx, inputs in enumerate(test_loader):
+                inputs = sanitize(inputs)
                 if torch.cuda.is_available():
                     inputs = inputs.cuda()
                             
@@ -1216,6 +1218,7 @@ class PytorchExtension(Extension):
             
                 probabilities = []
                 for batch_idx, inputs in enumerate(test_loader):
+                    inputs = sanitize(inputs)
                     if torch.cuda.is_available():
                         inputs = inputs.cuda()
                     # Perform inference on the batch
