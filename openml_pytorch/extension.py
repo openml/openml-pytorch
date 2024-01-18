@@ -1493,6 +1493,12 @@ class PytorchExtension(Extension):
         return model
 
 
-    def check_if_model_fitted(self, model: Any):
-        
-        pass
+    def check_if_model_fitted(self, model: Any) -> bool:
+        """Returns True/False denoting if the model has already been fitted/trained
+        Parameters
+        ----------
+        model : Any
+        Returns
+        -------
+        bool
+        """
