@@ -1165,7 +1165,7 @@ class PytorchExtension(Extension):
                             
                         # Print training progress information
                         running_loss += loss_opt.item()
-                        if batch_idx % 100 == 99: #  print every 10 mini-batches
+                        if batch_idx % 100 == 99: #  print every 100 mini-batches
                             print(f'Epoch: {epoch + 1}, Batch: {batch_idx + 1:5d}, Loss: {running_loss / 100:.3f}')
                             running_loss = 0.
                         
