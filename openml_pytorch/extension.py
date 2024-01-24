@@ -346,7 +346,6 @@ class PytorchExtension(Extension):
             rval = self._serialize_methoddescriptor(o)
         else:
             raise TypeError(o, type(o))
-
         return rval
 
     def get_version_information(self) -> List[str]:
@@ -1131,10 +1130,11 @@ class PytorchExtension(Extension):
                 train, label_mapping = self.openml2pytorch_data(X_train, y_train, task)
                 train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size,
                                                            shuffle=True, pin_memory = pin_memory)
-                
+        
                 for epoch in range(epoch_count):
                     correct = 0
                     incorrect = 0
+                    running_loss = 0.
                     
                     for batch_idx, (inputs, labels) in enumerate(train_loader):
                         
@@ -1162,7 +1162,13 @@ class PytorchExtension(Extension):
                             incorrect += (predicted != labels).sum()
                             accuracy_tensor = torch.tensor(1.0) * correct / (correct + incorrect)
                             accuracy = accuracy_tensor.item()
-
+                            
+                        # Print training progress information
+                        running_loss += loss_opt.item()
+                        if batch_idx % 100 == 99: #  print every 10 mini-batches
+                            print(f'Epoch: {epoch + 1}, Batch: {batch_idx + 1:5d}, Loss: {running_loss / 100:.3f}')
+                            running_loss = 0.
+                        
                         progress_callback(fold_no, rep_no, epoch, batch_idx,
                                           loss_opt.item(), accuracy)
 
