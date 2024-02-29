@@ -420,7 +420,8 @@ class PytorchExtension(Extension):
         import zlib
         import os
 
-        class_name = model.__module__ + "." + model.__class__.__name__
+        # class_name = model.__module__ + "." + model.__class__.__name__
+        class_name = 'torch.nn' + "." + model.__class__.__name__
         class_name += '.'
         class_name += format(zlib.crc32(bytearray(os.urandom(32))), 'x')
         class_name += format(zlib.crc32(bytearray(os.urandom(32))), 'x')
