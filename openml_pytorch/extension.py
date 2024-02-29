@@ -293,7 +293,7 @@ class PytorchExtension(Extension):
                      % ('-' * recursion_depth, o, rval))
         return rval
 
-    def model_to_flow(self, model: Any) -> 'OpenMLFlow':
+    def model_to_flow(self, model: Any, custom_name: Optional[str] = None) -> 'OpenMLFlow':
         """Transform a Pytorch model to a flow for uploading it to OpenML.
 
         Parameters
@@ -305,13 +305,13 @@ class PytorchExtension(Extension):
         OpenMLFlow
         """
         # Necessary to make pypy not complain about all the different possible return types
-        return self._serialize_pytorch(model)
+        return self._serialize_pytorch(model, custom_name)
 
-    def _serialize_pytorch(self, o: Any, parent_model: Optional[Any] = None) -> Any:
+    def _serialize_pytorch(self, o: Any, parent_model: Optional[Any] = None, custom_name: Optional[str] = None) -> Any:
         rval = None  # type: Any
         if self.is_estimator(o):
             # is the main model or a submodel
-            rval = self._serialize_model(o)
+            rval = self._serialize_model(o, custom_name)
         elif isinstance(o, (list, tuple)):
             rval = [self._serialize_pytorch(element, parent_model) for element in o]
             if isinstance(o, tuple):
@@ -393,7 +393,7 @@ class PytorchExtension(Extension):
             or ',torch==' in flow.external_version
         )
 
-    def _serialize_model(self, model: Any) -> OpenMLFlow:
+    def _serialize_model(self, model: Any, custom_name: Optional[str] = None) -> OpenMLFlow:
         """Create an OpenMLFlow.
 
         Calls `pytorch_to_flow` recursively to properly serialize the
@@ -454,7 +454,8 @@ class PytorchExtension(Extension):
                           tags=['openml-python', 'pytorch',
                                 'python', torch_version_formatted],
                           language='English',
-                          dependencies=dependencies)
+                          dependencies=dependencies, 
+                          custom_name=custom_name)
 
         return flow
 
@@ -1177,7 +1178,7 @@ class PytorchExtension(Extension):
             raise PyOpenMLError(str(e))
 
         if isinstance(task, OpenMLClassificationTask):
-            model_classes = np.amax(y_train)
+            model_classes = np.argmax(y_train, axis = -1)
 
         # In supervised learning this returns the predictions for Y
         if isinstance(task, OpenMLSupervisedTask):
