@@ -7,4 +7,4 @@ openml_pytorch/layers/__pycache__/
 
 venv
 
-openml_pytorch/model.onnx
+model.onnx
