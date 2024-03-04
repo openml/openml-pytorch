@@ -65,3 +65,21 @@ run.publish()
 
 print('URL for run: %s/run/%d' % (openml.config.server, run.run_id))
 ############################################################################
+
+# Visualize model in netron
+import netron
+
+# Define input size
+input_size = (32,3,128,128)
+
+# Create a dummy input with the specified size
+dummy_input = torch.randn(input_size)
+
+# Export the model to ONNX
+torch.onnx.export(model, dummy_input, "model.onnx", verbose=True)
+
+# Visualize the ONNX model using Netron
+netron.start("model.onnx")
+
+
+

@@ -55,6 +55,7 @@ openml_pytorch.config.optimizer_gen = custom_optimizer_gen
 ############################################################################
 
 # openml.config.apikey = 'KEY'
+
 ############################################################################
 # Download the OpenML task for the Meta_Album_PNU_Micro dataset.
 task = openml.tasks.get_task(361152)
@@ -69,3 +70,18 @@ run.publish()
 print('URL for run: %s/run/%d' % (openml.config.server, run.run_id))
 
 ############################################################################
+
+# Visualize model in netron
+import netron
+
+# Define input size
+input_size = (32,3,128,128)
+
+# Create a dummy input with the specified size
+dummy_input = torch.randn(input_size)
+
+# Export the model to ONNX
+torch.onnx.export(model, dummy_input, "model.onnx", verbose=True)
+
+# Visualize the ONNX model using Netron
+netron.start("model.onnx")
