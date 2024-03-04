@@ -113,7 +113,7 @@ class PytorchExtension(Extension):
             image = read_image(img_path)
             # label = self.img_labels.iloc[idx, 1]
             if self.transform:
-    #             image = self.transform(image)
+                # image = self.transform(image)
                 image = image.float()
             if self.has_labels:
                 label = self.img_labels.iloc[idx, 1]
@@ -122,7 +122,7 @@ class PytorchExtension(Extension):
                 return image
          
     def openml2pytorch_data(self, X, y, task) -> Any:
-        # task to get dataset id and name
+        # convert openml dataset to pytorch compatible dataset
         name = task.get_dataset().name
         dataset_id = task.dataset_id
         df = X
@@ -131,9 +131,11 @@ class PytorchExtension(Extension):
         label_mapping = {index: label for index, label in enumerate(label_encoder.classes_)}
         
         # ToDo: Change img_dir name to general dataset name instead of name.split('Meta_Album)
+        dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name 
+        
         data = self.OpenMLImageDataset(
             annotations_df= df[['FILE_NAME', 'encoded_labels']],
-            img_dir = openml.config.get_cache_directory()+'/datasets/{}/{}/images'.format(dataset_id, name.split('Meta_Album_')[1])
+            img_dir = openml.config.get_cache_directory()+'/datasets/{}/{}/images'.format(dataset_id, dataset_name)
             )
         return data, label_mapping
         
@@ -561,7 +563,7 @@ class PytorchExtension(Extension):
         if isinstance(module, Functional):
             params['args'] = getattr(module, 'args')
             params['kwargs'] = getattr(module, 'kwargs')
-
+        
         return params
 
     def _get_module_descriptors(self, model: torch.nn.Module, deep=True) -> Dict[str, Any]:
@@ -1066,7 +1068,6 @@ class PytorchExtension(Extension):
         additional_information: Optional, Any
             Additional information provided by the extension to be converted into additional files.
         """
-
         def _prediction_to_probabilities(y: np.ndarray, classes: List[Any]) -> np.ndarray:
             """Transforms predicted probabilities to match with OpenML class indices.
 
@@ -1132,7 +1133,6 @@ class PytorchExtension(Extension):
                 train, label_mapping = self.openml2pytorch_data(X_train, y_train, task)
                 train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size,
                                                            shuffle=True, pin_memory = pin_memory)
-        
                 for epoch in range(epoch_count):
                     correct = 0
                     incorrect = 0
@@ -1179,16 +1179,20 @@ class PytorchExtension(Extension):
             raise PyOpenMLError(str(e))
 
         if isinstance(task, OpenMLClassificationTask):
-            model_classes = np.argmax(y_train, axis = -1)
+            # Convert class labels to numerical indices
+            y_train_indices = np.array([list(label_mapping.keys())[list(label_mapping.values()).index(label)] for label in y_train])
+            model_classes = np.unique(y_train_indices)
+            # model_classes = np.amax(y_train)
 
         # In supervised learning this returns the predictions for Y
         if isinstance(task, OpenMLSupervisedTask):
             model_copy.eval()
                 
             name = task.get_dataset().name
+            dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name 
             test = self.OpenMLImageDataset(
                 annotations_df=X_test[['FILE_NAME']],
-                img_dir=openml.config.get_cache_directory()+'/datasets/{}/{}/images'.format(task.dataset_id, name.split('Meta_Album_')[1])
+                img_dir=openml.config.get_cache_directory()+'/datasets/{}/{}/images'.format(task.dataset_id, dataset_name)
                 )
 
             test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,
@@ -1216,9 +1220,10 @@ class PytorchExtension(Extension):
             try:
                 model_copy.eval()
                 
+                dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name 
                 test = self.OpenMLImageDataset(
                     annotations_df=X_test[['FILE_NAME']],
-                    img_dir=openml.config.get_cache_directory()+'/datasets/{}/{}/images'.format(task.dataset_id, name.split('Meta_Album_')[1])
+                    img_dir=openml.config.get_cache_directory()+'/datasets/{}/{}/images'.format(task.dataset_id, dataset_name)
                     )
 
                 test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,

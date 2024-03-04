@@ -50,7 +50,7 @@ scheduler_gen = _default_scheduler_gen  # type: Callable[[torch.optim.Optimizer,
 batch_size = 64  # type: int
 
 # epoch_count represents the number of epochs the model should be trained for
-epoch_count = 32  # type: int
+epoch_count = 1  # type: int
 
 
 # _default_predict turns the outputs into predictions by returning the argmax of the output tensor

@@ -6,3 +6,5 @@ openml_pytorch/__pycache__/
 openml_pytorch/layers/__pycache__/
 
 venv
+
+openml_pytorch/model.onnx
