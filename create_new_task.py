@@ -2,7 +2,7 @@ import openml
 from openml.tasks import OpenMLClassificationTask
 
 task = openml.tasks.get_task(361175)
-openml.config.apikey = 'd7f058387fb3c8ba41e1ae61ebd999a0'
+# openml.config.apikey = 'KEY'
 # Define task parameters
 task_type = openml.tasks.TaskType.SUPERVISED_CLASSIFICATION
 evaluation_measure = 'predictive_accuracy'
