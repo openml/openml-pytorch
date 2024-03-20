@@ -33,7 +33,7 @@ class Net(nn.Module):
         self.conv2 = nn.Conv2d(6, 16, 5)
         self.fc1 = nn.Linear(13456, 120)
         self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 20) # To user - Remember to set correct size of last layer. 
+        self.fc3 = nn.Linear(84, 19) # To user - Remember to set correct size of last layer. 
 
     def forward(self, x):
         x = self.pool(F.relu(self.conv1(x)))
@@ -61,25 +61,30 @@ task = openml.tasks.get_task(361987)
 # Run the model on the task (requires an API key).m
 run = openml.runs.run_model_on_task(model, task, avoid_duplicate_runs=False)
 
+# If you want to publish the run with the onnx file, 
+# then you must call openml_tensorflow.add_onnx_to_run() immediately before run.publish(). 
+# When you publish, onnx file of last trained model is uploaded. 
+# Careful to not call this function when another run_model_on_task is called in between, 
+# as during publish later, only the last trained model (from last run_model_on_task call) is uploaded.   
+run = openml_pytorch.add_onnx_to_run(run)
+
 run.publish()
 
 print('URL for run: %s/run/%d' % (openml.config.server, run.run_id))
 ############################################################################
 
 # Visualize model in netron
+
+from urllib.request import urlretrieve
+
+published_run = openml.runs.get_run(run.run_id)
+url = 'https://api.openml.org/data/download/{}/model.onnx'.format(published_run.output_files['onnx_model'])
+
+file_path, _ = urlretrieve(url, 'model.onnx')
+
 import netron
-
-# Define input size
-input_size = (32,3,128,128)
-
-# Create a dummy input with the specified size
-dummy_input = torch.randn(input_size)
-
-# Export the model to ONNX
-torch.onnx.export(model, dummy_input, "model.onnx", verbose=True)
-
 # Visualize the ONNX model using Netron
-netron.start("model.onnx")
+netron.start(file_path)
 
 
 

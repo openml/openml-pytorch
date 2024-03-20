@@ -40,7 +40,8 @@ setuptools.setup(name="openml-pytorch",
                  python_requires=">=3.5",
                  install_requires=[
                      'openml',
-                     'torch>=1.4.0'
+                     'torch>=1.4.0',
+                     'onnx'
                  ],
                  classifiers=['Intended Audience :: Science/Research',
                               'Intended Audience :: Developers',

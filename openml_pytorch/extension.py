@@ -40,6 +40,9 @@ from torchvision.io import read_image
 from torch.utils.data import Dataset
 from sklearn import preprocessing
 
+import io
+import onnx
+
 if sys.version_info >= (3, 5):
     from json.decoder import JSONDecodeError
 else:
@@ -56,6 +59,9 @@ SIMPLE_NUMPY_TYPES = [nptype for type_cat, nptypes in np.sctypes.items()
                       for nptype in nptypes if type_cat != 'others']
 SIMPLE_TYPES = tuple([bool, int, float, str] + SIMPLE_NUMPY_TYPES)
 
+## Variable to support a hack to add ONNX to runs without modifying openml-python
+last_models = None
+sample_input = None
 
 class PytorchExtension(Extension):
     """Connect Pytorch to OpenML-Python."""
@@ -1141,9 +1147,14 @@ class PytorchExtension(Extension):
                     for batch_idx, (inputs, labels) in enumerate(train_loader):
                         
                         inputs = sanitize(inputs)
+                         
                         if torch.cuda.is_available():
                             inputs = inputs.cuda()
                             labels = labels.cuda()
+                        
+                         # Below two lines are hack to convert model to onnx
+                        global sample_input
+                        sample_input = inputs
                             
                         def _optimizer_step():
                             optimizer.zero_grad()
@@ -1284,7 +1295,16 @@ class PytorchExtension(Extension):
 
         else:
             raise TypeError(type(task))
-
+        
+        # Convert model to onnx 
+        f = io.BytesIO()
+        torch.onnx.export(model_copy, sample_input, f)
+        onnx_model = onnx.load_model_from_string(f.getvalue())
+        onnx_ = onnx_model.SerializeToString()
+        
+        global last_models
+        last_models = onnx_
+        
         return pred_y, proba_y, user_defined_measures, None
 
     def compile_additional_information(
