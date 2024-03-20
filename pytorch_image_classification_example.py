@@ -62,7 +62,7 @@ task = openml.tasks.get_task(361987)
 run = openml.runs.run_model_on_task(model, task, avoid_duplicate_runs=False)
 
 # If you want to publish the run with the onnx file, 
-# then you must call openml_tensorflow.add_onnx_to_run() immediately before run.publish(). 
+# then you must call openml_pytorch.add_onnx_to_run() immediately before run.publish(). 
 # When you publish, onnx file of last trained model is uploaded. 
 # Careful to not call this function when another run_model_on_task is called in between, 
 # as during publish later, only the last trained model (from last run_model_on_task call) is uploaded.   
