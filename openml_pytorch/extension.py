@@ -12,6 +12,7 @@ import warnings
 
 import numpy as np
 import pandas as pd
+
 import scipy.sparse
 import scipy.special
 from . import config
@@ -38,6 +39,8 @@ from openml.tasks import (
 import os 
 from torchvision.io import read_image
 from torch.utils.data import Dataset
+from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
+
 from sklearn import preprocessing
 
 import io
@@ -116,11 +119,22 @@ class PytorchExtension(Extension):
 
         def __getitem__(self, idx):
             img_path = os.path.join(self.img_dir, self.img_labels.iloc[idx, 0])
-            image = read_image(img_path)
+
+            try:
+                image = read_image(img_path)
+            except RuntimeError as error:
+                # print(f"Error loading image {img_path}: {error}")
+                # Use a default image        
+                from .config import image_size
+                image = torch.zeros((3, image_size, image_size), dtype=torch.uint8)
+                
             # label = self.img_labels.iloc[idx, 1]
             if self.transform:
-                # image = self.transform(image)
+                if not self.transform == 1:
+                    image = self.transform(image)
                 image = image.float()
+
+
             if self.has_labels:
                 label = self.img_labels.iloc[idx, 1]
                 return image, label
@@ -129,20 +143,37 @@ class PytorchExtension(Extension):
          
     def openml2pytorch_data(self, X, y, task) -> Any:
         # convert openml dataset to pytorch compatible dataset
-        name = task.get_dataset().name
-        dataset_id = task.dataset_id
+        #name = task.get_dataset().name
+        #dataset_id = task.dataset_id
+
+        from .config import file_dir, filename_col, image_size
         df = X
-        label_encoder = preprocessing.LabelEncoder().fit(y)
-        df['encoded_labels'] = label_encoder.transform(y)
-        label_mapping = {index: label for index, label in enumerate(label_encoder.classes_)}
-        
-        # ToDo: Change img_dir name to general dataset name instead of name.split('Meta_Album)
-        dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name 
-        
+        columns_to_use = [filename_col]
+
+        if y is not None:
+            label_encoder = preprocessing.LabelEncoder().fit(y)
+            df.loc[:, 'encoded_labels'] = label_encoder.transform(y)
+            label_mapping = {index: label for index, label in enumerate(label_encoder.classes_)}
+            columns_to_use = [filename_col, 'encoded_labels']
+        else:
+            label_mapping = None
+
+        def convert_to_rgb(image):
+            if image.mode != 'RGB':
+                return image.convert('RGB')
+            return image
+
         data = self.OpenMLImageDataset(
-            annotations_df= df[['FILE_NAME', 'encoded_labels']],
-            img_dir = openml.config.get_cache_directory()+'/datasets/{}/{}/images'.format(dataset_id, dataset_name)
+            annotations_df= df[columns_to_use],
+            img_dir = file_dir,
+            transform = Compose([
+                ToPILImage(),  # Convert tensor to PIL Image to ensure PIL Image operations can be applied.
+                Lambda(convert_to_rgb),  # Convert PIL Image to RGB if it's not already.
+                Resize((image_size, image_size)),  # Resize the image.
+                ToTensor()  # Convert the PIL Image back to a tensor.
+            ])
             )
+        
         return data, label_mapping
         
     ################################################################################################
@@ -1117,6 +1148,7 @@ class PytorchExtension(Extension):
             progress_callback, epoch_count, \
             batch_size, \
             predict, predict_proba, \
+            file_dir, filename_col, \
             sanitize, retype_labels
 
         user_defined_measures = OrderedDict()  # type: 'OrderedDict[str, float]'
@@ -1135,17 +1167,16 @@ class PytorchExtension(Extension):
                     criterion = criterion.cuda()
                     pin_memory = True
                     
-               
                 train, label_mapping = self.openml2pytorch_data(X_train, y_train, task)
                 train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size,
                                                            shuffle=True, pin_memory = pin_memory)
+
                 for epoch in range(epoch_count):
                     correct = 0
                     incorrect = 0
-                    running_loss = 0.
-                    
+                    running_loss = 0.0
+
                     for batch_idx, (inputs, labels) in enumerate(train_loader):
-                        
                         inputs = sanitize(inputs)
                          
                         if torch.cuda.is_available():
@@ -1181,7 +1212,7 @@ class PytorchExtension(Extension):
                         if batch_idx % 100 == 99: #  print every 100 mini-batches
                             print(f'Epoch: {epoch + 1}, Batch: {batch_idx + 1:5d}, Loss: {running_loss / 100:.3f}')
                             running_loss = 0.
-                        
+
                         progress_callback(fold_no, rep_no, epoch, batch_idx,
                                           loss_opt.item(), accuracy)
 
@@ -1199,13 +1230,9 @@ class PytorchExtension(Extension):
         if isinstance(task, OpenMLSupervisedTask):
             model_copy.eval()
                 
-            name = task.get_dataset().name
-            dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name 
-            test = self.OpenMLImageDataset(
-                annotations_df=X_test[['FILE_NAME']],
-                img_dir=openml.config.get_cache_directory()+'/datasets/{}/{}/images'.format(task.dataset_id, dataset_name)
-                )
-
+            #name = task.get_dataset().name
+            #dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name
+            test, _ = self.openml2pytorch_data(X_test, None, task)
             test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,
                                                            shuffle=False, pin_memory = torch.cuda.is_available())
             probabilities = []
@@ -1231,14 +1258,18 @@ class PytorchExtension(Extension):
             try:
                 model_copy.eval()
                 
-                dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name 
-                test = self.OpenMLImageDataset(
-                    annotations_df=X_test[['FILE_NAME']],
-                    img_dir=openml.config.get_cache_directory()+'/datasets/{}/{}/images'.format(task.dataset_id, dataset_name)
-                    )
-
+                test, _ = self.openml2pytorch_data(X_test, None, task)
                 test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,
-                                                           shuffle=False, pin_memory = torch.cuda.is_available())
+                                                          shuffle=True, pin_memory = torch.cuda.is_available())
+                
+                #dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name 
+                #test = self.OpenMLImageDataset(
+                #    annotations_df=X_test[[filename_col]],
+                #    img_dir=file_dir
+                #    )
+
+                #test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,
+                #                                           shuffle=False, pin_memory = torch.cuda.is_available())
             
                 probabilities = []
                 for batch_idx, inputs in enumerate(test_loader):
