@@ -36,12 +36,14 @@ setuptools.setup(name="openml-pytorch",
                      include=['openml_pytorch.*', 'openml_pytorch'],
                      exclude=["*.tests", "*.tests.*", "tests.*", "tests"],
                  ),
+                #  python 3.12 have removed distutils, so for now, we only support till python <3.11
                  package_data={'': ['*.txt', '*.md']},
-                 python_requires=">=3.5",
+                 python_requires=">=3.5, <3.11",
                  install_requires=[
                      'openml',
-                     'torch>=1.4.0',
-                     'onnx'
+                     'torch>=1.4.0, <2.2.0',
+                     'onnx',
+                     'torchvision',
                  ],
                  classifiers=['Intended Audience :: Science/Research',
                               'Intended Audience :: Developers',
