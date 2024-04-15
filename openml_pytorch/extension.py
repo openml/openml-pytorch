@@ -1190,6 +1190,8 @@ class PytorchExtension(Extension):
                         def _optimizer_step():
                             optimizer.zero_grad()
                             outputs = model_copy(inputs)
+                            if labels.dtype != torch.int64:
+                                labels = torch.tensor(labels, dtype=torch.long, device = labels.device)
                             loss = criterion(outputs, labels)
                             loss.backward()
                             return loss
