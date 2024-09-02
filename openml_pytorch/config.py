@@ -131,6 +131,10 @@ def _default_progress_callback(fold: int, rep: int, epoch: int,
 progress_callback = _default_progress_callback  \
     # type: Callable[[int, int, int, int, float, float], None]
 
+data_augemntation = None
+
+perform_validation = False 
+validation_split = 0.1 
 
 def _setup():
     global logger
@@ -147,5 +151,8 @@ def _setup():
     global file_dir
     global filename_col
     global target_mode
+    global data_augemntation
+    global perform_validation
+    global validation_split
 
 _setup()

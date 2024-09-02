@@ -14,6 +14,12 @@ import openml_pytorch.layers
 import openml_pytorch.config
 import logging
 
+import warnings
+import pandas as pd
+
+# Suppress FutureWarning messages
+warnings.simplefilter(action='ignore')
+
 ############################################################################
 # Enable logging in order to observe the progress while running the example.
 openml.config.logger.setLevel(logging.DEBUG)
@@ -47,8 +53,10 @@ class Net(nn.Module):
 net = Net()
 
 ############################################################################
-# openml.config.apikey = 'KEY'
-
+openml.config.apikey = 'key'
+openml_pytorch.config.file_dir = openml.config.get_cache_directory()+'/datasets/44312/PNU_Micro/images/'
+openml_pytorch.config.filename_col = "FILE_NAME"
+openml_pytorch.config.perform_validation = False
 ############################################################################
 # The main network, composed of the above specified networks.
 model = net

@@ -143,9 +143,7 @@ class PytorchExtension(Extension):
          
     def openml2pytorch_data(self, X, y, task) -> Any:
         # convert openml dataset to pytorch compatible dataset
-        #name = task.get_dataset().name
-        #dataset_id = task.dataset_id
-
+    
         from .config import file_dir, filename_col, image_size
         df = X
         columns_to_use = [filename_col]
@@ -1153,6 +1151,8 @@ class PytorchExtension(Extension):
 
         user_defined_measures = OrderedDict()  # type: 'OrderedDict[str, float]'
 
+        # X_train['labels'] = y_train
+        
         try:
 
             if isinstance(task, OpenMLSupervisedTask):
@@ -1166,11 +1166,26 @@ class PytorchExtension(Extension):
                 if torch.cuda.is_available():
                     criterion = criterion.cuda()
                     pin_memory = True
+                # breakpoint()    
+                if config.perform_validation:
+                    from sklearn.model_selection import train_test_split
                     
-                train, label_mapping = self.openml2pytorch_data(X_train, y_train, task)
-                train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size,
+                    # TODO: Here we're assuming that X has a label column, this won't work in general
+                    X_train_train, x_val, y_train_train, y_val = train_test_split(X_train, y_train, test_size=config.validation_split, shuffle=True, stratify=y_train, random_state=0) 
+                    train, label_mapping = self.openml2pytorch_data(X_train_train, y_train_train, task)
+                    train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size,
                                                            shuffle=True, pin_memory = pin_memory)
-
+                    
+                    val, _ = self.openml2pytorch_data(x_val, None, task)
+                    val_loader = torch.utils.data.DataLoader(val, batch_size=batch_size,
+                                                           shuffle=False, pin_memory = pin_memory)
+                    
+                else:
+                    
+                    train, label_mapping = self.openml2pytorch_data(X_train, y_train, task)
+                    train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size,
+                                                           shuffle=True, pin_memory = pin_memory)
+                
                 for epoch in range(epoch_count):
                     correct = 0
                     incorrect = 0
@@ -1178,7 +1193,7 @@ class PytorchExtension(Extension):
 
                     for batch_idx, (inputs, labels) in enumerate(train_loader):
                         inputs = sanitize(inputs)
-                         
+                        
                         if torch.cuda.is_available():
                             inputs = inputs.cuda()
                             labels = labels.cuda()
@@ -1190,12 +1205,12 @@ class PytorchExtension(Extension):
                         def _optimizer_step():
                             optimizer.zero_grad()
                             outputs = model_copy(inputs)
-                            if labels.dtype != torch.int64:
-                                labels = torch.tensor(labels, dtype=torch.long, device = labels.device)
                             loss = criterion(outputs, labels)
                             loss.backward()
                             return loss
 
+                        if labels.dtype != torch.int64:
+                                labels = torch.tensor(labels, dtype=torch.long, device = labels.device)
                         loss_opt = optimizer.step(_optimizer_step)
                         scheduler.step(loss_opt)
 
@@ -1217,15 +1232,52 @@ class PytorchExtension(Extension):
 
                         progress_callback(fold_no, rep_no, epoch, batch_idx,
                                           loss_opt.item(), accuracy)
-
+                
+                    # validation phase
+                    if config.perform_validation:
+                      
+                        model_copy.eval()
+                        correct_val = 0
+                        incorrect_val = 0
+                        val_loss = 0
+                        
+                        with torch.no_grad():
+                            for inputs_val, labels_val in enumerate(val_loader):
+                                
+                                if torch.cuda.is_available():
+                                    inputs_val = inputs.cuda()
+                                    labels_val = labels.cuda()
+                                outputs_val = model_copy(inputs_val)
+                                if labels_val.dtype != torch.int64:
+                                    labels_val = torch.tensor(labels_val, dtype=torch.long, device = labels.device)
+                                loss_val = criterion(outputs_val, labels_val)
+                                
+                                predicted_val = predict(outputs_val, task)
+                                correct_val += (predicted_val == labels_val).sum().item()
+                                incorrect_val += (predicted_val != labels_val).sum().item()
+                        
+                                val_loss += loss_val.item()
+                                
+                        accuracy_val = correct_val/(correct_val + incorrect_val)
+                        
+                        # Print validation metrics
+                        print(f'Epoch: {epoch + 1}, Validation Loss: {val_loss / len(val_loader):.3f}, Validation Accuracy: {accuracy_val:.3f}')
+                
         except AttributeError as e:
-            # typically happens when training a regressor on classification task
+            # typically happens when training a regressor8 on classification task
             raise PyOpenMLError(str(e))
 
         if isinstance(task, OpenMLClassificationTask):
             # Convert class labels to numerical indices
-            y_train_indices = np.array([list(label_mapping.keys())[list(label_mapping.values()).index(label)] for label in y_train])
-            model_classes = np.unique(y_train_indices)
+            
+            x_train_labels = (
+                X_train_train['encoded_labels']
+                if config.perform_validation
+                else (X_train['Class_encoded']
+                    if 'Class_encoded' in X_train
+                    else X_train['encoded_labels'])
+                )
+            model_classes =  np.sort(x_train_labels.astype('int').unique())
             # model_classes = np.amax(y_train)
 
         # In supervised learning this returns the predictions for Y
