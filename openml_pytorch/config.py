@@ -120,6 +120,10 @@ def _default_progress_callback(fold: int, rep: int, epoch: int,
 progress_callback = _default_progress_callback  \
     # type: Callable[[int, int, int, int, float, float], None]
 
+data_augmentation = None
+
+perform_validation = False 
+validation_split = 0.1 
 
 def _setup():
     global logger
