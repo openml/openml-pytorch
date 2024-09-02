@@ -50,8 +50,19 @@ scheduler_gen = _default_scheduler_gen  # type: Callable[[torch.optim.Optimizer,
 batch_size = 64  # type: int
 
 # epoch_count represents the number of epochs the model should be trained for
-epoch_count = 32  # type: int
+epoch_count = 1  # type: int
 
+# filename_col is the name of the column in the dataset that contains the filenames
+filename_col = "Filename"
+
+# file_dir is the absolute path of the directory where the image files are stored
+file_dir = "images"
+
+# target_mode is the mode of the target column, either "categorical" or "numerical"
+target_mode = "categorical"
+
+# image_size is the size of the images that are fed into the model
+image_size = 128
 
 # _default_predict turns the outputs into predictions by returning the argmax of the output tensor
 # for classification tasks, and by flattening the prediction in case of the regression
@@ -137,6 +148,11 @@ def _setup():
     global sanitize
     global retype_labels
     global progress_callback
-
+    global file_dir
+    global filename_col
+    global target_mode
+    global data_augemntation
+    global perform_validation
+    global validation_split
 
 _setup()

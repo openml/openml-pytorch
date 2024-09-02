@@ -12,6 +12,7 @@ import warnings
 
 import numpy as np
 import pandas as pd
+
 import scipy.sparse
 import scipy.special
 from . import config
@@ -35,6 +36,15 @@ from openml.tasks import (
     OpenMLRegressionTask,
 )
 
+import os 
+from torchvision.io import read_image
+from torch.utils.data import Dataset
+from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
+
+from sklearn import preprocessing
+
+import io
+import onnx
 
 if sys.version_info >= (3, 5):
     from json.decoder import JSONDecodeError
@@ -52,6 +62,9 @@ SIMPLE_NUMPY_TYPES = [nptype for type_cat, nptypes in np.sctypes.items()
                       for nptype in nptypes if type_cat != 'others']
 SIMPLE_TYPES = tuple([bool, int, float, str] + SIMPLE_NUMPY_TYPES)
 
+## Variable to support a hack to add ONNX to runs without modifying openml-python
+last_models = None
+sample_input = None
 
 class PytorchExtension(Extension):
     """Connect Pytorch to OpenML-Python."""
@@ -89,7 +102,78 @@ class PytorchExtension(Extension):
         """
         from torch.nn import Module
         return isinstance(model, Module)
+    
+    ################################################################################################
+    # Method for dataloader 
+    
+    class OpenMLImageDataset(Dataset):
+        def __init__(self, annotations_df, img_dir, transform=1, target_transform=None):
+            self.img_labels = annotations_df
+            self.img_dir = img_dir
+            self.transform = transform
+            self.target_transform = target_transform
+            self.has_labels = 'encoded_labels' in annotations_df.columns
 
+        def __len__(self):
+            return len(self.img_labels)
+
+        def __getitem__(self, idx):
+            img_path = os.path.join(self.img_dir, self.img_labels.iloc[idx, 0])
+
+            try:
+                image = read_image(img_path)
+            except RuntimeError as error:
+                # print(f"Error loading image {img_path}: {error}")
+                # Use a default image        
+                from .config import image_size
+                image = torch.zeros((3, image_size, image_size), dtype=torch.uint8)
+                
+            # label = self.img_labels.iloc[idx, 1]
+            if self.transform:
+                if not self.transform == 1:
+                    image = self.transform(image)
+                image = image.float()
+
+
+            if self.has_labels:
+                label = self.img_labels.iloc[idx, 1]
+                return image, label
+            else:
+                return image
+         
+    def openml2pytorch_data(self, X, y, task) -> Any:
+        # convert openml dataset to pytorch compatible dataset
+    
+        from .config import file_dir, filename_col, image_size
+        df = X
+        columns_to_use = [filename_col]
+
+        if y is not None:
+            label_encoder = preprocessing.LabelEncoder().fit(y)
+            df.loc[:, 'encoded_labels'] = label_encoder.transform(y)
+            label_mapping = {index: label for index, label in enumerate(label_encoder.classes_)}
+            columns_to_use = [filename_col, 'encoded_labels']
+        else:
+            label_mapping = None
+
+        def convert_to_rgb(image):
+            if image.mode != 'RGB':
+                return image.convert('RGB')
+            return image
+
+        data = self.OpenMLImageDataset(
+            annotations_df= df[columns_to_use],
+            img_dir = file_dir,
+            transform = Compose([
+                ToPILImage(),  # Convert tensor to PIL Image to ensure PIL Image operations can be applied.
+                Lambda(convert_to_rgb),  # Convert PIL Image to RGB if it's not already.
+                Resize((image_size, image_size)),  # Resize the image.
+                ToTensor()  # Convert the PIL Image back to a tensor.
+            ])
+            )
+        
+        return data, label_mapping
+        
     ################################################################################################
     # Methods for flow serialization and de-serialization
 
@@ -246,7 +330,7 @@ class PytorchExtension(Extension):
                      % ('-' * recursion_depth, o, rval))
         return rval
 
-    def model_to_flow(self, model: Any) -> 'OpenMLFlow':
+    def model_to_flow(self, model: Any, custom_name: Optional[str] = None) -> 'OpenMLFlow':
         """Transform a Pytorch model to a flow for uploading it to OpenML.
 
         Parameters
@@ -258,14 +342,13 @@ class PytorchExtension(Extension):
         OpenMLFlow
         """
         # Necessary to make pypy not complain about all the different possible return types
-        return self._serialize_pytorch(model)
+        return self._serialize_pytorch(model, custom_name)
 
-    def _serialize_pytorch(self, o: Any, parent_model: Optional[Any] = None) -> Any:
+    def _serialize_pytorch(self, o: Any, parent_model: Optional[Any] = None, custom_name: Optional[str] = None) -> Any:
         rval = None  # type: Any
-
         if self.is_estimator(o):
             # is the main model or a submodel
-            rval = self._serialize_model(o)
+            rval = self._serialize_model(o, custom_name)
         elif isinstance(o, (list, tuple)):
             rval = [self._serialize_pytorch(element, parent_model) for element in o]
             if isinstance(o, tuple):
@@ -300,7 +383,6 @@ class PytorchExtension(Extension):
             rval = self._serialize_methoddescriptor(o)
         else:
             raise TypeError(o, type(o))
-
         return rval
 
     def get_version_information(self) -> List[str]:
@@ -348,7 +430,7 @@ class PytorchExtension(Extension):
             or ',torch==' in flow.external_version
         )
 
-    def _serialize_model(self, model: Any) -> OpenMLFlow:
+    def _serialize_model(self, model: Any, custom_name: Optional[str] = None) -> OpenMLFlow:
         """Create an OpenMLFlow.
 
         Calls `pytorch_to_flow` recursively to properly serialize the
@@ -363,7 +445,7 @@ class PytorchExtension(Extension):
         OpenMLFlow
 
         """
-
+        
         # Get all necessary information about the model objects itself
         parameters, parameters_meta_info, subcomponents, subcomponents_explicit = \
             self._extract_information_from_model(model)
@@ -375,7 +457,8 @@ class PytorchExtension(Extension):
         import zlib
         import os
 
-        class_name = model.__module__ + "." + model.__class__.__name__
+        # class_name = model.__module__ + "." + model.__class__.__name__
+        class_name = 'torch.nn' + "." + model.__class__.__name__
         class_name += '.'
         class_name += format(zlib.crc32(bytearray(os.urandom(32))), 'x')
         class_name += format(zlib.crc32(bytearray(os.urandom(32))), 'x')
@@ -409,7 +492,8 @@ class PytorchExtension(Extension):
                           tags=['openml-python', 'pytorch',
                                 'python', torch_version_formatted],
                           language='English',
-                          dependencies=dependencies)
+                          dependencies=dependencies, 
+                          custom_name=custom_name)
 
         return flow
 
@@ -514,7 +598,7 @@ class PytorchExtension(Extension):
         if isinstance(module, Functional):
             params['args'] = getattr(module, 'args')
             params['kwargs'] = getattr(module, 'kwargs')
-
+        
         return params
 
     def _get_module_descriptors(self, model: torch.nn.Module, deep=True) -> Dict[str, Any]:
@@ -524,6 +608,7 @@ class PytorchExtension(Extension):
         model_parameters = dict((k, v) for (k, v) in model.named_parameters())
 
         parameters = dict()  # type: Dict[str, Any]
+        
         if not self._is_container_module(model):
             # For non-containers, we simply extract the hyperparameters.
             parameters = self._get_module_hyperparameters(model, model_parameters)
@@ -561,8 +646,8 @@ class PytorchExtension(Extension):
         sub_components_explicit = set()
         parameters = OrderedDict()  # type: OrderedDict[str, Optional[str]]
         parameters_meta_info = OrderedDict()  # type: OrderedDict[str, Optional[Dict]]
-
-        model_parameters = self._get_module_descriptors(model, deep=False)
+        
+        model_parameters = self._get_module_descriptors(model, deep=True)
         for k, v in sorted(model_parameters.items(), key=lambda t: t[0]):
             rval = self._serialize_pytorch(v, model)
 
@@ -644,6 +729,7 @@ class PytorchExtension(Extension):
                 # places where we encode a value as json to make sure that all
                 # parameter values still have the same type after
                 # deserialization
+                
                 if isinstance(rval, tuple):
                     parameter_json = json.dumps(tuple(parameter_value))
                 else:
@@ -1017,7 +1103,6 @@ class PytorchExtension(Extension):
         additional_information: Optional, Any
             Additional information provided by the extension to be converted into additional files.
         """
-
         def _prediction_to_probabilities(y: np.ndarray, classes: List[Any]) -> np.ndarray:
             """Transforms predicted probabilities to match with OpenML class indices.
 
@@ -1049,7 +1134,7 @@ class PytorchExtension(Extension):
                 raise TypeError('argument y_train must not be of type None')
             if X_test is None:
                 raise TypeError('argument X_test must not be of type None')
-
+        
         model_copy = copy.deepcopy(model)
 
         if torch.cuda.is_available():
@@ -1061,10 +1146,13 @@ class PytorchExtension(Extension):
             progress_callback, epoch_count, \
             batch_size, \
             predict, predict_proba, \
+            file_dir, filename_col, \
             sanitize, retype_labels
 
         user_defined_measures = OrderedDict()  # type: 'OrderedDict[str, float]'
 
+        # X_train['labels'] = y_train
+        
         try:
 
             if isinstance(task, OpenMLSupervisedTask):
@@ -1073,27 +1161,47 @@ class PytorchExtension(Extension):
                 criterion = criterion_gen(task)
                 optimizer = optimizer_gen(model_copy, task)
                 scheduler = scheduler_gen(optimizer, task)
-
-                torch_X_train = torch.from_numpy(X_train)
-                torch_X_train = sanitize(torch_X_train)
-                torch_y_train = torch.from_numpy(y_train)
-                torch_y_train = retype_labels(torch_y_train, task)
+                pin_memory = False
 
                 if torch.cuda.is_available():
                     criterion = criterion.cuda()
-
-                    torch_X_train = torch_X_train.cuda()
-                    torch_y_train = torch_y_train.cuda()
-
-                train = torch.utils.data.TensorDataset(torch_X_train, torch_y_train)
-                train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size,
-                                                           shuffle=True)
-
+                    pin_memory = True
+                # breakpoint()    
+                if config.perform_validation:
+                    from sklearn.model_selection import train_test_split
+                    
+                    # TODO: Here we're assuming that X has a label column, this won't work in general
+                    X_train_train, x_val, y_train_train, y_val = train_test_split(X_train, y_train, test_size=config.validation_split, shuffle=True, stratify=y_train, random_state=0) 
+                    train, label_mapping = self.openml2pytorch_data(X_train_train, y_train_train, task)
+                    train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size,
+                                                           shuffle=True, pin_memory = pin_memory)
+                    
+                    val, _ = self.openml2pytorch_data(x_val, None, task)
+                    val_loader = torch.utils.data.DataLoader(val, batch_size=batch_size,
+                                                           shuffle=False, pin_memory = pin_memory)
+                    
+                else:
+                    
+                    train, label_mapping = self.openml2pytorch_data(X_train, y_train, task)
+                    train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size,
+                                                           shuffle=True, pin_memory = pin_memory)
+                
                 for epoch in range(epoch_count):
                     correct = 0
                     incorrect = 0
+                    running_loss = 0.0
 
                     for batch_idx, (inputs, labels) in enumerate(train_loader):
+                        inputs = sanitize(inputs)
+                        
+                        if torch.cuda.is_available():
+                            inputs = inputs.cuda()
+                            labels = labels.cuda()
+                        
+                         # Below two lines are hack to convert model to onnx
+                        global sample_input
+                        sample_input = inputs
+                            
                         def _optimizer_step():
                             optimizer.zero_grad()
                             outputs = model_copy(inputs)
@@ -1101,6 +1209,8 @@ class PytorchExtension(Extension):
                             loss.backward()
                             return loss
 
+                        if labels.dtype != torch.int64:
+                                labels = torch.tensor(labels, dtype=torch.long, device = labels.device)
                         loss_opt = optimizer.step(_optimizer_step)
                         scheduler.step(loss_opt)
 
@@ -1113,29 +1223,87 @@ class PytorchExtension(Extension):
                             incorrect += (predicted != labels).sum()
                             accuracy_tensor = torch.tensor(1.0) * correct / (correct + incorrect)
                             accuracy = accuracy_tensor.item()
+                            
+                        # Print training progress information
+                        running_loss += loss_opt.item()
+                        if batch_idx % 100 == 99: #  print every 100 mini-batches
+                            print(f'Epoch: {epoch + 1}, Batch: {batch_idx + 1:5d}, Loss: {running_loss / 100:.3f}')
+                            running_loss = 0.
 
                         progress_callback(fold_no, rep_no, epoch, batch_idx,
                                           loss_opt.item(), accuracy)
-
+                
+                    # validation phase
+                    if config.perform_validation:
+                      
+                        model_copy.eval()
+                        correct_val = 0
+                        incorrect_val = 0
+                        val_loss = 0
+                        
+                        with torch.no_grad():
+                            for inputs_val, labels_val in enumerate(val_loader):
+                                
+                                if torch.cuda.is_available():
+                                    inputs_val = inputs.cuda()
+                                    labels_val = labels.cuda()
+                                outputs_val = model_copy(inputs_val)
+                                if labels_val.dtype != torch.int64:
+                                    labels_val = torch.tensor(labels_val, dtype=torch.long, device = labels.device)
+                                loss_val = criterion(outputs_val, labels_val)
+                                
+                                predicted_val = predict(outputs_val, task)
+                                correct_val += (predicted_val == labels_val).sum().item()
+                                incorrect_val += (predicted_val != labels_val).sum().item()
+                        
+                                val_loss += loss_val.item()
+                                
+                        accuracy_val = correct_val/(correct_val + incorrect_val)
+                        
+                        # Print validation metrics
+                        print(f'Epoch: {epoch + 1}, Validation Loss: {val_loss / len(val_loader):.3f}, Validation Accuracy: {accuracy_val:.3f}')
+                
         except AttributeError as e:
-            # typically happens when training a regressor on classification task
+            # typically happens when training a regressor8 on classification task
             raise PyOpenMLError(str(e))
 
         if isinstance(task, OpenMLClassificationTask):
-            model_classes = np.amax(y_train)
+            # Convert class labels to numerical indices
+            
+            x_train_labels = (
+                X_train_train['encoded_labels']
+                if config.perform_validation
+                else (X_train['Class_encoded']
+                    if 'Class_encoded' in X_train
+                    else X_train['encoded_labels'])
+                )
+            model_classes =  np.sort(x_train_labels.astype('int').unique())
+            # model_classes = np.amax(y_train)
 
         # In supervised learning this returns the predictions for Y
         if isinstance(task, OpenMLSupervisedTask):
             model_copy.eval()
+                
+            #name = task.get_dataset().name
+            #dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name
+            test, _ = self.openml2pytorch_data(X_test, None, task)
+            test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,
+                                                           shuffle=False, pin_memory = torch.cuda.is_available())
+            probabilities = []
+            for batch_idx, inputs in enumerate(test_loader):
+                inputs = sanitize(inputs)
+                if torch.cuda.is_available():
+                    inputs = inputs.cuda()
+                            
+                # Perform inference on the batch
+                pred_y_batch = model_copy(inputs)
+                pred_y_batch = predict(pred_y_batch, task)
+                pred_y_batch = pred_y_batch.cpu().detach().numpy()
 
-            inputs = torch.from_numpy(X_test)
-            inputs = sanitize(inputs)
-            if torch.cuda.is_available():
-                inputs = inputs.cuda()
-
-            pred_y = model_copy(inputs)
-            pred_y = predict(pred_y, task)
-            pred_y = pred_y.cpu().detach().numpy()
+                probabilities.append(pred_y_batch)
+            
+            # Concatenate probabilities from all batches
+            pred_y = np.concatenate(probabilities, axis=0)
         else:
             raise ValueError(task)
 
@@ -1143,21 +1311,44 @@ class PytorchExtension(Extension):
 
             try:
                 model_copy.eval()
+                
+                test, _ = self.openml2pytorch_data(X_test, None, task)
+                test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,
+                                                          shuffle=True, pin_memory = torch.cuda.is_available())
+                
+                #dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name 
+                #test = self.OpenMLImageDataset(
+                #    annotations_df=X_test[[filename_col]],
+                #    img_dir=file_dir
+                #    )
 
-                inputs = torch.from_numpy(X_test)
-                inputs = sanitize(inputs)
-                if torch.cuda.is_available():
-                    inputs = inputs.cuda()
+                #test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,
+                #                                           shuffle=False, pin_memory = torch.cuda.is_available())
+            
+                probabilities = []
+                for batch_idx, inputs in enumerate(test_loader):
+                    inputs = sanitize(inputs)
+                    if torch.cuda.is_available():
+                        inputs = inputs.cuda()
+                    # Perform inference on the batch
+                    proba_y_batch = model_copy(inputs)
+                    proba_y_batch = predict_proba(proba_y_batch)
+                    proba_y_batch = proba_y_batch.cpu().detach().numpy()
 
-                proba_y = model_copy(inputs)
-                proba_y = predict_proba(proba_y)
-                proba_y = proba_y.cpu().detach().numpy()
-            except AttributeError:
+                    probabilities.append(proba_y_batch)
+                
+                # Concatenate probabilities from all batches
+                proba_y = np.concatenate(probabilities, axis=0)
+                
+            except AttributeError:    
                 if task.class_labels is not None:
                     proba_y = _prediction_to_probabilities(pred_y, list(task.class_labels))
                 else:
                     raise ValueError('The task has no class labels')
-
+            
+            if task.class_labels is None:
+                    task.class_labels = list(label_mapping.values())
+                    
             if task.class_labels is not None:
                 if proba_y.shape[1] != len(task.class_labels):
                     # Remap the probabilities in case there was a class missing
@@ -1189,7 +1380,16 @@ class PytorchExtension(Extension):
 
         else:
             raise TypeError(type(task))
-
+        
+        # Convert model to onnx 
+        f = io.BytesIO()
+        torch.onnx.export(model_copy, sample_input, f)
+        onnx_model = onnx.load_model_from_string(f.getvalue())
+        onnx_ = onnx_model.SerializeToString()
+        
+        global last_models
+        last_models = onnx_
+        
         return pred_y, proba_y, user_defined_measures, None
 
     def compile_additional_information(
@@ -1411,3 +1611,12 @@ class PytorchExtension(Extension):
         return model
 
 
+    def check_if_model_fitted(self, model: Any) -> bool:
+        """Returns True/False denoting if the model has already been fitted/trained
+        Parameters
+        ----------
+        model : Any
+        Returns
+        -------
+        bool
+        """
