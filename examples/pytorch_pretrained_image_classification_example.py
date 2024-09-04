@@ -54,7 +54,9 @@ openml_pytorch.config.optimizer_gen = custom_optimizer_gen
 
 ############################################################################
 
-# openml.config.apikey = 'KEY'
+openml.config.apikey = 'KEY'
+openml_pytorch.config.filename_col = "FILE_NAME"
+openml_pytorch.config.perform_validation = False
 
 ############################################################################
 # Download the OpenML task for the Meta_Album_PNU_Micro dataset.
