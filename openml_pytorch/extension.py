@@ -1137,8 +1137,8 @@ class PytorchExtension(Extension):
         
         model_copy = copy.deepcopy(model)
 
-        if torch.cuda.is_available():
-            model_copy = model_copy.cuda()
+        # if torch.cuda.is_available():
+        model_copy = model_copy.to(config.device)
 
         from .config import \
             criterion_gen, \
@@ -1162,11 +1162,12 @@ class PytorchExtension(Extension):
                 optimizer = optimizer_gen(model_copy, task)
                 scheduler = scheduler_gen(optimizer, task)
                 pin_memory = False
-
-                if torch.cuda.is_available():
-                    criterion = criterion.cuda()
+                
+                # if torch.cuda.is_available():
+                if config.device.type != "cpu":
+                    criterion = criterion.to(config.device)
                     pin_memory = True
-                # breakpoint()    
+                
                 if config.perform_validation:
                     from sklearn.model_selection import train_test_split
                     
@@ -1194,9 +1195,9 @@ class PytorchExtension(Extension):
                     for batch_idx, (inputs, labels) in enumerate(train_loader):
                         inputs = sanitize(inputs)
                         
-                        if torch.cuda.is_available():
-                            inputs = inputs.cuda()
-                            labels = labels.cuda()
+                        # if torch.cuda.is_available():
+                        inputs = inputs.to(config.device)
+                        labels = labels.to(config.device)
                         
                          # Below two lines are hack to convert model to onnx
                         global sample_input
@@ -1244,9 +1245,9 @@ class PytorchExtension(Extension):
                         with torch.no_grad():
                             for inputs_val, labels_val in enumerate(val_loader):
                                 
-                                if torch.cuda.is_available():
-                                    inputs_val = inputs.cuda()
-                                    labels_val = labels.cuda()
+                                # if torch.cuda.is_available():
+                                inputs_val = inputs.to(config.device)
+                                labels_val = labels.to(config.device)
                                 outputs_val = model_copy(inputs_val)
                                 if labels_val.dtype != torch.int64:
                                     labels_val = torch.tensor(labels_val, dtype=torch.long, device = labels.device)
@@ -1286,14 +1287,15 @@ class PytorchExtension(Extension):
                 
             #name = task.get_dataset().name
             #dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name
+            
             test, _ = self.openml2pytorch_data(X_test, None, task)
             test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,
-                                                           shuffle=False, pin_memory = torch.cuda.is_available())
+                                                           shuffle=False, pin_memory = config.device.type != 'cpu')
             probabilities = []
             for batch_idx, inputs in enumerate(test_loader):
                 inputs = sanitize(inputs)
-                if torch.cuda.is_available():
-                    inputs = inputs.cuda()
+                # if torch.cuda.is_available():
+                inputs = inputs.to(config.device)
                             
                 # Perform inference on the batch
                 pred_y_batch = model_copy(inputs)
@@ -1314,7 +1316,7 @@ class PytorchExtension(Extension):
                 
                 test, _ = self.openml2pytorch_data(X_test, None, task)
                 test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size,
-                                                          shuffle=True, pin_memory = torch.cuda.is_available())
+                                                          shuffle=True, pin_memory = config.device.type != 'cpu')
                 
                 #dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name 
                 #test = self.OpenMLImageDataset(
@@ -1328,8 +1330,8 @@ class PytorchExtension(Extension):
                 probabilities = []
                 for batch_idx, inputs in enumerate(test_loader):
                     inputs = sanitize(inputs)
-                    if torch.cuda.is_available():
-                        inputs = inputs.cuda()
+                    # if torch.cuda.is_available():
+                    inputs = inputs.to(config.device)
                     # Perform inference on the batch
                     proba_y_batch = model_copy(inputs)
                     proba_y_batch = predict_proba(proba_y_batch)

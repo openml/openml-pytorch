@@ -136,6 +136,18 @@ data_augmentation = None
 perform_validation = False 
 validation_split = 0.1 
 
+def get_device():
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+        
+    return device
+    
+device = get_device()
+
 def _setup():
     global logger
     global criterion_gen
@@ -151,7 +163,7 @@ def _setup():
     global file_dir
     global filename_col
     global target_mode
-    global data_augemntation
+    global data_augmentation
     global perform_validation
     global validation_split
 
