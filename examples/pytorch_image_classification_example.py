@@ -57,6 +57,9 @@ openml.config.apikey = 'key'
 openml_pytorch.config.file_dir = openml.config.get_cache_directory()+'/datasets/44312/PNU_Micro/images/'
 openml_pytorch.config.filename_col = "FILE_NAME"
 openml_pytorch.config.perform_validation = False
+#You can set the device type here, 
+# alternatively config auto selects it for you depending on the device availability. 
+openml_pytorch.config.device = torch.device("cpu") 
 ############################################################################
 # The main network, composed of the above specified networks.
 model = net
@@ -74,25 +77,25 @@ run = openml.runs.run_model_on_task(model, task, avoid_duplicate_runs=False)
 # When you publish, onnx file of last trained model is uploaded. 
 # Careful to not call this function when another run_model_on_task is called in between, 
 # as during publish later, only the last trained model (from last run_model_on_task call) is uploaded.   
-run = openml_pytorch.add_onnx_to_run(run)
+# run = openml_pytorch.add_onnx_to_run(run)
+breakpoint()
+# run.publish()
 
-run.publish()
+# print('URL for run: %s/run/%d' % (openml.config.server, run.run_id))
+# ############################################################################
 
-print('URL for run: %s/run/%d' % (openml.config.server, run.run_id))
-############################################################################
+# # Visualize model in netron
 
-# Visualize model in netron
+# from urllib.request import urlretrieve
 
-from urllib.request import urlretrieve
+# published_run = openml.runs.get_run(run.run_id)
+# url = 'https://api.openml.org/data/download/{}/model.onnx'.format(published_run.output_files['onnx_model'])
 
-published_run = openml.runs.get_run(run.run_id)
-url = 'https://api.openml.org/data/download/{}/model.onnx'.format(published_run.output_files['onnx_model'])
+# file_path, _ = urlretrieve(url, 'model.onnx')
 
-file_path, _ = urlretrieve(url, 'model.onnx')
-
-import netron
-# Visualize the ONNX model using Netron
-netron.start(file_path)
+# import netron
+# # Visualize the ONNX model using Netron
+# netron.start(file_path)
 
 
 
