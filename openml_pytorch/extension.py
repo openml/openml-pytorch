@@ -16,6 +16,7 @@ import pandas as pd
 import scipy.sparse
 import scipy.special
 from . import config
+from openml_pytorch.vision.data import OpenMLImageDataset
 
 import torch
 import torch.nn
@@ -37,8 +38,7 @@ from openml.tasks import (
 )
 
 import os 
-from torchvision.io import read_image
-from torch.utils.data import Dataset
+
 from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
 
 from sklearn import preprocessing
@@ -106,41 +106,6 @@ class PytorchExtension(Extension):
     ################################################################################################
     # Method for dataloader 
     
-    class OpenMLImageDataset(Dataset):
-        def __init__(self, annotations_df, img_dir, transform=1, target_transform=None):
-            self.img_labels = annotations_df
-            self.img_dir = img_dir
-            self.transform = transform
-            self.target_transform = target_transform
-            self.has_labels = 'encoded_labels' in annotations_df.columns
-
-        def __len__(self):
-            return len(self.img_labels)
-
-        def __getitem__(self, idx):
-            img_path = os.path.join(self.img_dir, self.img_labels.iloc[idx, 0])
-
-            try:
-                image = read_image(img_path)
-            except RuntimeError as error:
-                # print(f"Error loading image {img_path}: {error}")
-                # Use a default image        
-                from .config import image_size
-                image = torch.zeros((3, image_size, image_size), dtype=torch.uint8)
-                
-            # label = self.img_labels.iloc[idx, 1]
-            if self.transform:
-                if not self.transform == 1:
-                    image = self.transform(image)
-                image = image.float()
-
-
-            if self.has_labels:
-                label = self.img_labels.iloc[idx, 1]
-                return image, label
-            else:
-                return image
-         
     def openml2pytorch_data(self, X, y, task) -> Any:
         # convert openml dataset to pytorch compatible dataset
     
@@ -161,7 +126,8 @@ class PytorchExtension(Extension):
                 return image.convert('RGB')
             return image
 
-        data = self.OpenMLImageDataset(
+        data = OpenMLImageDataset(
+            image_size=image_size,
             annotations_df= df[columns_to_use],
             img_dir = file_dir,
             transform = Compose([
