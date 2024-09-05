@@ -16,7 +16,7 @@ import pandas as pd
 import scipy.sparse
 import scipy.special
 from . import config
-from openml_pytorch.trainer import OpenMLModule
+from openml_pytorch.trainer import OpenMLTrainerModule
 
 import torch
 import torch.nn
@@ -1065,7 +1065,7 @@ class PytorchExtension(Extension):
             'retype_labels': retype_labels
         }
 
-        runner = OpenMLModule(config=config)
+        runner = OpenMLTrainerModule(config=config)
         return runner.run_model_on_fold(model, task, X_train, rep_no, fold_no, y_train, X_test)
     
 

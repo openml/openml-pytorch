@@ -16,7 +16,7 @@ import pandas as pd
 import scipy.sparse
 import scipy.special
 from . import config
-from openml_pytorch.trainer import OpenMLModule
+from openml_pytorch.trainer import OpenMLTrainerModule
 
 import torch
 import torch.nn
@@ -1040,34 +1040,14 @@ class PytorchExtension(Extension):
             Additional information provided by the extension to be converted into additional files.
         """
 
-        from .config import \
-            criterion_gen, \
-            optimizer_gen, scheduler_gen, \
-            progress_callback, epoch_count, \
-            batch_size, \
-            predict, predict_proba, \
-            file_dir, filename_col, \
-            sanitize, retype_labels, perform_validation, image_size
-
-        config = SimpleNamespace(
-            device='cuda' if torch.cuda.is_available() else 'cpu',
-            criterion_gen=criterion_gen,
-            optimizer_gen=optimizer_gen,
-            scheduler_gen=scheduler_gen,
-            progress_callback=progress_callback,
-            epoch_count = epoch_count,
-            batch_size = batch_size,
-            predict = predict,
-            predict_proba = predict_proba,
-            file_dir = file_dir,
-            filename_col = filename_col,
-            sanitize = sanitize,
-            retype_labels = retype_labels,
-            perform_validation = perform_validation,
-            image_size = image_size
-        )
-
-        trainer = OpenMLModule(config=config)
+        try:
+            # model_config = openml.extensions.model_config
+            # data_config = openml.extensions.data_config
+            model_config = config.model_config
+            data_config = config.data_config
+        except AttributeError:
+            raise ValueError('Config not set. Please set the config before running the model.')
+        trainer = OpenMLTrainerModule(model_config, data_config)
         return trainer.run_model_on_fold(model, task, X_train, rep_no, fold_no, y_train, X_test)
     
 

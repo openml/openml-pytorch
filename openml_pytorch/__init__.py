@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from .extension import PytorchExtension
 from . import config
 from . import layers
@@ -7,9 +8,10 @@ from openml.extensions import register_extension
 import torch
 import io
 import onnx
+import openml
 
 
-__all__ = ['PytorchExtension', 'config', 'layers','add_onnx_to_run', 'trainer']
+__all__ = ['PytorchExtension', 'config', 'layers','add_onnx_to_run', 'trainer', 'setup_config', 'data']
 
 register_extension(PytorchExtension)
 
@@ -24,4 +26,7 @@ def add_onnx_to_run(run):
     
     run._get_file_elements = modified_get_file_elements
     return run
-    
+
+def setup_config(model_config, data_config):
+    config.model_config = model_config
+    config.data_config = data_config 

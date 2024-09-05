@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 import warnings
 import numpy as np
 import torch
@@ -18,13 +19,25 @@ import io
 import onnx
 from .data import OpenMLImageDataset
 from openml.exceptions import PyOpenMLError
+import openml
 
 
-class OpenMLModule:
+class OpenMLTrainerModule:
 
-    def __init__(self, config):
-        self.config = config
+    def __init__(self, model_config, data_config):
+        # self.model_config: SimpleNamespace = openml.runs.data_config
+        # self.data_config: SimpleNamespace = openml.runs.model_config
+        self.model_config = model_config
+        self.data_config = data_config
+        self.config = SimpleNamespace(**{**self.model_config.__dict__, **self.data_config.__dict__})
         self.user_defined_measures = OrderedDict()
+
+        # self.setup_configs(model_config, data_config)
+    
+    # def setup_configs(self, model_config, data_config):
+    #     self.model_config = model_config
+    #     self.data_config = data_config
+    
     
     def openml2pytorch_data(self, X, y, task) -> Any:
         # convert openml dataset to pytorch compatible dataset
@@ -87,6 +100,8 @@ class OpenMLModule:
             return result
     
     def run_model_on_fold(self, model, task, X_train, rep_no, fold_no, y_train, X_test):
+        
+
         model_copy = copy.deepcopy(model).to(self.config.device)
         try:
             if isinstance(task, OpenMLSupervisedTask) or isinstance(task, OpenMLClassificationTask):
