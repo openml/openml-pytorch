@@ -140,6 +140,7 @@ class DefaultConfigGenerator:
 
     def return_data_config(self):
         return SimpleNamespace(
+            type_of_data  = "image",
             # progress_callback is called when a training step is finished, in order to report the current progress
            
             # sanitize sanitizes the input data in order to ensure that models can be trained safely
@@ -156,28 +157,40 @@ class DefaultConfigGenerator:
             data_augmentation=None,
         )
 
+class OpenMLDataModule:
+    def __init__(self,
+                 type_of_data="image",
+                 filename_col="Filename",
+                file_dir="images",
+                target_mode="categorical", **kwargs
+            ):
+        self.type_of_data = type_of_data
+        self.config_gen = DefaultConfigGenerator()
+        self.data_config = self.config_gen.return_data_config()
 
+        self.data_config.filename_col = filename_col
+        self.data_config.file_dir = file_dir
+        self.data_config.target_mode = target_mode
+    
+    
+        
+        
 class OpenMLTrainerModule:
     def __init__(
         self,
-        filename_col="Filename",
-        file_dir="images",
-        target_mode="categorical",
+        data_module: OpenMLDataModule,
         **kwargs,
     ):
-        # self.model_config: SimpleNamespace = openml.runs.data_config
-        # self.data_config: SimpleNamespace = openml.runs.model_config
+
         self.config_gen = DefaultConfigGenerator()
         self.model_config = self.config_gen.return_model_config()
-        self.data_config = self.config_gen.return_data_config()
+        self.data_module = data_module
+
         self.config = SimpleNamespace(
-            **{**self.model_config.__dict__, **self.data_config.__dict__}
+            **{**self.model_config.__dict__, **self.data_module.data_config.__dict__}
         )
         # update the config with the user defined values
         self.config.__dict__.update(kwargs)
-        self.config.filename_col = filename_col
-        self.config.file_dir = file_dir
-        self.config.target_mode = target_mode
         self.config.progress_callback = self._default_progress_callback
         self.logger: logging.Logger = logging.getLogger(__name__)
 
@@ -198,46 +211,50 @@ class OpenMLTrainerModule:
     def check_config(self):
         raise NotImplementedError
 
+    def convert_to_rgb(self,image):
+        if image.mode != "RGB":
+            return image.convert("RGB")
+        return image
+
     def openml2pytorch_data(self, X, y, task) -> Any:
         # convert openml dataset to pytorch compatible dataset
+        if self.data_module.type_of_data == "image":
+            df = X
+            columns_to_use = [self.config.filename_col]
 
-        df = X
-        columns_to_use = [self.config.filename_col]
+            if y is not None:
+                label_encoder = preprocessing.LabelEncoder().fit(y)
+                df.loc[:, "encoded_labels"] = label_encoder.transform(y)
+                label_mapping = {
+                    index: label for index, label in enumerate(label_encoder.classes_)
+                }
+                columns_to_use = [self.config.filename_col, "encoded_labels"]
+            else:
+                label_mapping = None
 
-        if y is not None:
-            label_encoder = preprocessing.LabelEncoder().fit(y)
-            df.loc[:, "encoded_labels"] = label_encoder.transform(y)
-            label_mapping = {
-                index: label for index, label in enumerate(label_encoder.classes_)
-            }
-            columns_to_use = [self.config.filename_col, "encoded_labels"]
+            
+
+            data = OpenMLImageDataset(
+                image_size=self.config.image_size,
+                annotations_df=df[columns_to_use],
+                img_dir=self.config.file_dir,
+                transform=Compose(
+                    [
+                        ToPILImage(),  # Convert tensor to PIL Image to ensure PIL Image operations can be applied.
+                        Lambda(
+                            self.convert_to_rgb
+                        ),  # Convert PIL Image to RGB if it's not already.
+                        Resize(
+                            (self.config.image_size, self.config.image_size)
+                        ),  # Resize the image.
+                        ToTensor(),  # Convert the PIL Image back to a tensor.
+                    ]
+                ),
+            )
+
+            return data, label_mapping
         else:
-            label_mapping = None
-
-        def convert_to_rgb(image):
-            if image.mode != "RGB":
-                return image.convert("RGB")
-            return image
-
-        data = OpenMLImageDataset(
-            image_size=self.config.image_size,
-            annotations_df=df[columns_to_use],
-            img_dir=self.config.file_dir,
-            transform=Compose(
-                [
-                    ToPILImage(),  # Convert tensor to PIL Image to ensure PIL Image operations can be applied.
-                    Lambda(
-                        convert_to_rgb
-                    ),  # Convert PIL Image to RGB if it's not already.
-                    Resize(
-                        (self.config.image_size, self.config.image_size)
-                    ),  # Resize the image.
-                    ToTensor(),  # Convert the PIL Image back to a tensor.
-                ]
-            ),
-        )
-
-        return data, label_mapping
+            raise ValueError("Data type not supported")
 
     def _prediction_to_probabilities(
         self, y: np.ndarray, classes: List[Any]

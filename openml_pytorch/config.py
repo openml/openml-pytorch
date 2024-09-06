@@ -1,7 +1,9 @@
 #TODO: remove this somehow
-from .trainer import OpenMLTrainerModule
+from .trainer import OpenMLTrainerModule, OpenMLDataModule
 import logging
-trainer: OpenMLTrainerModule = OpenMLTrainerModule()
+
+data_module: OpenMLDataModule = OpenMLDataModule()
+trainer: OpenMLTrainerModule = OpenMLTrainerModule(data_module=data_module)
 
 global logger
 # logger is the default logger for the PyTorch extension

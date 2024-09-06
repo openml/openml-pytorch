@@ -109,7 +109,7 @@ class PytorchExtension(Extension):
     # Method for dataloader 
     
     
-        
+ 
     ################################################################################################
     # Methods for flow serialization and de-serialization
 
@@ -1044,7 +1044,7 @@ class PytorchExtension(Extension):
             trainer:OpenMLTrainerModule = config.trainer
             trainer.logger = config.logger
         except AttributeError:
-            raise ValueError('Trainer not set to config. Please set the config before running the model.')
+            raise ValueError('Trainer not set to config. Please use openml_pytorch.config.trainer = trainer to set the trainer.')
         return trainer.run_model_on_fold(model, task, X_train, rep_no, fold_no, y_train, X_test)
     
 
