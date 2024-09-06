@@ -1041,13 +1041,10 @@ class PytorchExtension(Extension):
         """
 
         try:
-            # model_config = openml.extensions.model_config
-            # data_config = openml.extensions.data_config
-            model_config = config.model_config
-            data_config = config.data_config
+            trainer:OpenMLTrainerModule = config.trainer
+            trainer.logger = config.logger
         except AttributeError:
-            raise ValueError('Config not set. Please set the config before running the model.')
-        trainer = OpenMLTrainerModule(model_config, data_config)
+            raise ValueError('Trainer not set to config. Please set the config before running the model.')
         return trainer.run_model_on_fold(model, task, X_train, rep_no, fold_no, y_train, X_test)
     
 

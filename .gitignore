@@ -8,3 +8,7 @@ openml_pytorch/layers/__pycache__/
 venv
 
 model.onnx
+
+build/
+dist/
+openml_pytorch.egg-info/
