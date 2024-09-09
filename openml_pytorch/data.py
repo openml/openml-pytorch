@@ -4,10 +4,11 @@ from sklearn import preprocessing
 import torch
 from torchvision.io import read_image
 from torch.utils.data import Dataset
-from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
+# from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
+import torchvision.transforms as T
 
 class OpenMLImageDataset(Dataset):
-    def __init__(self,image_size, annotations_df, img_dir, transform=1, target_transform=None):
+    def __init__(self,image_size, annotations_df, img_dir, transform=None, target_transform=None):
         self.img_labels = annotations_df
         self.img_dir = img_dir
         self.transform = transform
@@ -30,11 +31,9 @@ class OpenMLImageDataset(Dataset):
             image = torch.zeros((3, self.image_size, self.image_size), dtype=torch.uint8)
             
         # label = self.img_labels.iloc[idx, 1]
-        if self.transform:
-            if not self.transform == 1:
-                image = self.transform(image)
+        if self.transform is not None:
+            image = self.transform(image)
             image = image.float()
-
 
         if self.has_labels:
             label = self.img_labels.iloc[idx, 1]

@@ -37,17 +37,13 @@ class DefaultConfigGenerator:
         else:
             raise ValueError(task)
 
-    def _default_optimizer_gen(
-        self, model: torch.nn.Module, _: OpenMLTask
-    ) -> torch.optim.Optimizer:
+    def _default_optimizer_gen(self, model: torch.nn.Module, _: OpenMLTask):
         """
         _default_optimizer_gen returns the torch.optim.Adam optimizer for the given model
         """
-        return torch.optim.Adam(params=model.parameters())
+        return torch.optim.Adam
 
-    def _default_scheduler_gen(
-        self, optim: torch.optim.Optimizer, _: OpenMLTask
-    ) -> Any:
+    def _default_scheduler_gen(self, optim, _: OpenMLTask) -> Any:
         """
         _default_scheduler_gen returns the torch.optim.lr_scheduler.ReduceLROnPlateau scheduler for the given optimizer
         """
@@ -66,7 +62,9 @@ class DefaultConfigGenerator:
             raise ValueError(task)
         return output
 
-    def _default_predict_proba(self, output: torch.Tensor) -> torch.Tensor:
+    def _default_predict_proba(
+        self, output: torch.Tensor, task: OpenMLTask
+    ) -> torch.Tensor:
         """
         _default_predict_proba turns the outputs into probabilities using softmax
         """
@@ -131,18 +129,17 @@ class DefaultConfigGenerator:
             # epoch_count represents the number of epochs the model should be trained for
             epoch_count=3,  # type: int,
             validation_split=0.1,
-             # progress_callback=(
+            # progress_callback=(
             #     self._default_progress_callback
             # ),  # type: Callable[[int, int, int, int, float, float], None]
             # enable progress bar
-            verbose = True
+            verbose=True,
         )
 
     def return_data_config(self):
         return SimpleNamespace(
-            type_of_data  = "image",
+            type_of_data="image",
             # progress_callback is called when a training step is finished, in order to report the current progress
-           
             # sanitize sanitizes the input data in order to ensure that models can be trained safely
             sanitize=self._default_sanitize,  # type: Callable[[torch.Tensor], torch.Tensor]
             # retype_labels changes the types of the labels in order to ensure type compatibility
@@ -157,13 +154,16 @@ class DefaultConfigGenerator:
             data_augmentation=None,
         )
 
+
 class OpenMLDataModule:
-    def __init__(self,
-                 type_of_data="image",
-                 filename_col="Filename",
-                file_dir="images",
-                target_mode="categorical", **kwargs
-            ):
+    def __init__(
+        self,
+        type_of_data="image",
+        filename_col="Filename",
+        file_dir="images",
+        target_mode="categorical",
+        **kwargs,
+    ):
         self.type_of_data = type_of_data
         self.config_gen = DefaultConfigGenerator()
         self.data_config = self.config_gen.return_data_config()
@@ -171,20 +171,108 @@ class OpenMLDataModule:
         self.data_config.filename_col = filename_col
         self.data_config.file_dir = file_dir
         self.data_config.target_mode = target_mode
-    
-    
-        
-        
+
+
+class Callback:
+    def __init__(self):
+        self.data = None
+
+    def on_train_begin(self):
+        pass
+
+    def on_train_end(self):
+        pass
+
+    def on_epoch_begin(self):
+        pass
+
+    def on_epoch_end(self):
+        pass
+
+    def on_batch_begin(self):
+        pass
+
+    def on_batch_end(self):
+        pass
+
+    def on_loss_begin(self):
+        pass
+
+    def on_loss_end(self):
+        pass
+
+    def on_opt_step_begin(self):
+        pass
+
+    def on_opt_step_end(self):
+        pass
+
+    def on_scheduler_step_begin(self):
+        pass
+
+    def on_scheduler_step_end(self):
+        pass
+
+
+class LoggingCallback(Callback):
+    def __init__(self, logger: logging.Logger, print_output: bool = False):
+        super().__init__()
+        self.logger = logger
+        self.print_output = print_output
+
+    def log_or_print(self, message: str):
+        if self.print_output:
+            print(message)
+        self.logger.info(message)
+
+    def on_train_begin(self):
+        self.log_or_print("Training started")
+
+    def on_train_end(self):
+        self.log_or_print("Training ended")
+
+    def on_epoch_begin(self):
+        self.log_or_print("Epoch started")
+
+    def on_epoch_end(self):
+        self.log_or_print("Epoch ended")
+
+    def on_batch_begin(self):
+        self.log_or_print("Batch started")
+
+    def on_batch_end(self):
+        self.log_or_print("Batch ended")
+
+    def on_loss_begin(self):
+        self.log_or_print("Loss calculation started")
+
+    def on_loss_end(self):
+        self.log_or_print("Loss calculation ended")
+
+    def on_opt_step_begin(self):
+        self.log_or_print("Optimizer step started")
+
+    def on_opt_step_end(self):
+        self.log_or_print("Optimizer step ended")
+
+    def on_scheduler_step_begin(self):
+        self.log_or_print("Scheduler step started")
+
+    def on_scheduler_step_end(self):
+        self.log_or_print("Scheduler step ended")
+
+
 class OpenMLTrainerModule:
     def __init__(
         self,
         data_module: OpenMLDataModule,
+        callbacks: List[Callback] = [],
         **kwargs,
     ):
-
         self.config_gen = DefaultConfigGenerator()
         self.model_config = self.config_gen.return_model_config()
         self.data_module = data_module
+        self.callbacks = callbacks
 
         self.config = SimpleNamespace(
             **{**self.model_config.__dict__, **self.data_module.data_config.__dict__}
@@ -195,10 +283,20 @@ class OpenMLTrainerModule:
         self.logger: logging.Logger = logging.getLogger(__name__)
 
         self.user_defined_measures = OrderedDict()
+        self.callbacks.append(LoggingCallback(self.logger, print_output=False))
+        self.loss = 0
+        self.training_state = True
+
+    def call_callbacks(self, method_name):
+        for callback in self.callbacks:
+            callback.data = self
+            cb = getattr(callback, method_name)
+            cb()
 
     def _default_progress_callback(
         self, fold: int, rep: int, epoch: int, step: int, loss: float, accuracy: float
     ):
+        # todo : move this into callback
         """
                 _default_progress_callback reports the current fold, rep, epoch, step and loss for every
         training iteration to the default logger
@@ -211,7 +309,7 @@ class OpenMLTrainerModule:
     def check_config(self):
         raise NotImplementedError
 
-    def convert_to_rgb(self,image):
+    def convert_to_rgb(self, image):
         if image.mode != "RGB":
             return image.convert("RGB")
         return image
@@ -231,8 +329,6 @@ class OpenMLTrainerModule:
                 columns_to_use = [self.config.filename_col, "encoded_labels"]
             else:
                 label_mapping = None
-
-            
 
             data = OpenMLImageDataset(
                 image_size=self.config.image_size,
@@ -297,22 +393,27 @@ class OpenMLTrainerModule:
         X_test: pd.DataFrame,
     ) -> Tuple[np.ndarray, Optional[np.ndarray], OrderedDict, Optional[Any]]:
 
-        model_copy = copy.deepcopy(model).to(self.config.device)
+        self.model = copy.deepcopy(model).to(self.config.device)
         try:
             if isinstance(task, OpenMLSupervisedTask) or isinstance(
                 task, OpenMLClassificationTask
             ):
-                model_copy.train()
+  
+                self.fold_no = fold_no
+                self.rep_no = rep_no
 
-                criterion = self.config.criterion_gen(task)
-                optimizer = self.config.optimizer_gen(model_copy, task)
-                scheduler = self.config.scheduler_gen(optimizer, task)
-                pin_memory = False
+                self.optimizer = self.config.optimizer_gen(self.model, task)(
+                    self.model.parameters()
+                )
+                self.scheduler = self.config.scheduler_gen(self.optimizer, task)
+
+                self.criterion = self.config.criterion_gen(task)
+                self.pin_memory = False
 
                 # if torch.cuda.is_available():
                 if self.config.device != "cpu":
-                    criterion = criterion.to(self.config.device)
-                    pin_memory = True
+                    self.criterion = self.criterion.to(self.config.device)
+                    self.pin_memory = True
 
                 if self.config.perform_validation:
                     from sklearn.model_selection import train_test_split
@@ -333,7 +434,7 @@ class OpenMLTrainerModule:
                         train,
                         batch_size=self.config.batch_size,
                         shuffle=True,
-                        pin_memory=pin_memory,
+                        pin_memory=self.pin_memory,
                     )
 
                     val, _ = self.openml2pytorch_data(x_val, None, task)
@@ -341,7 +442,7 @@ class OpenMLTrainerModule:
                         val,
                         batch_size=self.config.batch_size,
                         shuffle=False,
-                        pin_memory=pin_memory,
+                        pin_memory=self.pin_memory,
                     )
 
                 else:
@@ -353,70 +454,93 @@ class OpenMLTrainerModule:
                         train,
                         batch_size=self.config.batch_size,
                         shuffle=True,
-                        pin_memory=pin_memory,
+                        pin_memory=self.pin_memory,
                     )
-                
+
                 # we can disable tqdm but not enable it because that is how the API works. self.config.verbose is True by default. (So we need the opposite of the user input)
                 disable_progress_bar = not self.config.verbose
 
-                for epoch in tqdm(range(self.config.epoch_count), disable=disable_progress_bar, desc = "Epochs"):
-                    correct = 0
-                    incorrect = 0
-                    running_loss = 0.0
+                self.call_callbacks("on_train_begin")
+                for epoch in tqdm(
+                    range(self.config.epoch_count),
+                    disable=disable_progress_bar,
+                    desc="Epochs",
+                ):
+                    if self.training_state == True:
+                        self.epoch = epoch
+                        self.call_callbacks("on_epoch_begin")
+                        correct = 0
+                        incorrect = 0
+                        running_loss = 0.0
 
-                    for batch_idx, (inputs, labels) in enumerate(train_loader):
-                        inputs = self.config.sanitize(inputs)
+                        self.model.train()
 
-                        # if torch.cuda.is_available():
-                        inputs = inputs.to(self.config.device)
-                        labels = labels.to(self.config.device)
+                        for batch_idx, (inputs, labels) in enumerate(train_loader):
+                            self.call_callbacks("on_batch_begin")
+                            inputs = self.config.sanitize(inputs)
 
-                        # Below two lines are hack to convert model to onnx
-                        global sample_input
-                        sample_input = inputs
+                            # if torch.cuda.is_available():
+                            inputs = inputs.to(self.config.device)
+                            labels = labels.to(self.config.device)
 
-                        def _optimizer_step():
-                            optimizer.zero_grad()
-                            outputs = model_copy(inputs)
-                            loss = criterion(outputs, labels)
-                            loss.backward()
-                            return loss
+                            # Below two lines are hack to convert model to onnx
+                            global sample_input
+                            sample_input = inputs
 
-                        if labels.dtype != torch.int64:
-                            labels = torch.tensor(
-                                labels, dtype=torch.long, device=labels.device
+                            def _optimizer_step():
+                                outputs = self.model(inputs)
+                                self.call_callbacks("on_loss_begin")
+                                self.loss = self.criterion(outputs, labels)
+                                self.loss.backward()
+                                self.call_callbacks("on_loss_end")
+                                self.optimizer.zero_grad()
+                                return self.loss
+
+                            if labels.dtype != torch.int64:
+                                labels = torch.tensor(
+                                    labels, dtype=torch.long, device=labels.device
+                                )
+
+                            self.call_callbacks("on_opt_step_begin")
+                            self.loss_opt = self.optimizer.step(_optimizer_step)
+                            self.call_callbacks("on_opt_step_end")
+
+                            self.scheduler.step(self.loss_opt)
+
+                            predicted = self.model(inputs)
+                            predicted = self.config.predict(predicted, task)
+
+                            accuracy = float("nan")  # type: float
+                            if isinstance(task, OpenMLClassificationTask):
+                                correct += (predicted == labels).sum()
+                                incorrect += (predicted != labels).sum()
+                                accuracy_tensor = (
+                                    torch.tensor(1.0) * correct / (correct + incorrect)
+                                )
+                                accuracy = accuracy_tensor.item()
+
+                            # Print training progress information
+                            running_loss += self.loss_opt.item()
+                            if batch_idx % 100 == 99:  #  print every 100 mini-batches
+                                print(
+                                    f"Epoch: {epoch + 1}, Batch: {batch_idx + 1:5d}, Loss: {running_loss / 100:.3f}"
+                                )
+                                running_loss = 0.0
+
+                            self.config.progress_callback(
+                                fold_no,
+                                rep_no,
+                                epoch,
+                                batch_idx,
+                                self.loss_opt.item(),
+                                accuracy,
                             )
-                        loss_opt = optimizer.step(_optimizer_step)
-                        scheduler.step(loss_opt)
-
-                        predicted = model_copy(inputs)
-                        predicted = self.config.predict(predicted, task)
-
-                        accuracy = float("nan")  # type: float
-                        if isinstance(task, OpenMLClassificationTask):
-                            correct += (predicted == labels).sum()
-                            incorrect += (predicted != labels).sum()
-                            accuracy_tensor = (
-                                torch.tensor(1.0) * correct / (correct + incorrect)
-                            )
-                            accuracy = accuracy_tensor.item()
-
-                        # Print training progress information
-                        running_loss += loss_opt.item()
-                        if batch_idx % 100 == 99:  #  print every 100 mini-batches
-                            print(
-                                f"Epoch: {epoch + 1}, Batch: {batch_idx + 1:5d}, Loss: {running_loss / 100:.3f}"
-                            )
-                            running_loss = 0.0
-
-                        self.config.progress_callback(
-                            fold_no, rep_no, epoch, batch_idx, loss_opt.item(), accuracy
-                        )
+                            self.call_callbacks("on_batch_end")
 
                     # validation phase
                     if self.config.perform_validation:
 
-                        model_copy.eval()
+                        self.model.eval()
                         correct_val = 0
                         incorrect_val = 0
                         val_loss = 0
@@ -427,14 +551,14 @@ class OpenMLTrainerModule:
                                 # if torch.cuda.is_available():
                                 inputs_val = inputs.to(self.config.device)
                                 labels_val = labels.to(self.config.device)
-                                outputs_val = model_copy(inputs_val)
+                                outputs_val = self.model(inputs_val)
                                 if labels_val.dtype != torch.int64:
                                     labels_val = torch.tensor(
                                         labels_val,
                                         dtype=torch.long,
                                         device=labels.device,
                                     )
-                                loss_val = criterion(outputs_val, labels_val)
+                                loss_val = self.criterion(outputs_val, labels_val)
 
                                 predicted_val = self.config.predict(outputs_val, task)
                                 correct_val += (
@@ -452,6 +576,8 @@ class OpenMLTrainerModule:
                         print(
                             f"Epoch: {epoch + 1}, Validation Loss: {val_loss / len(val_loader):.3f}, Validation Accuracy: {accuracy_val:.3f}"
                         )
+                    self.call_callbacks("on_epoch_end")
+                self.call_callbacks("on_train_end")
 
         except AttributeError as e:
             # typically happens when training a regressor8 on classification task
@@ -474,7 +600,7 @@ class OpenMLTrainerModule:
 
         # In supervised learning this returns the predictions for Y
         if isinstance(task, OpenMLSupervisedTask):
-            model_copy.eval()
+            self.model.eval()
 
             # name = task.get_dataset().name
             # dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name
@@ -486,28 +612,14 @@ class OpenMLTrainerModule:
                 shuffle=False,
                 pin_memory=self.config.device != "cpu",
             )
-            probabilities = []
-            for batch_idx, inputs in enumerate(test_loader):
-                inputs = self.config.sanitize(inputs)
-                # if torch.cuda.is_available():
-                inputs = inputs.to(self.config.device)
-
-                # Perform inference on the batch
-                pred_y_batch = model_copy(inputs)
-                pred_y_batch = self.config.predict(pred_y_batch, task)
-                pred_y_batch = pred_y_batch.cpu().detach().numpy()
-
-                probabilities.append(pred_y_batch)
-
-            # Concatenate probabilities from all batches
-            pred_y = np.concatenate(probabilities, axis=0)
+            pred_y = self.pred_test(task, self.model, test_loader, self.config.predict)
         else:
             raise ValueError(task)
 
         if isinstance(task, OpenMLClassificationTask):
 
             try:
-                model_copy.eval()
+                self.model.eval()
 
                 test, _ = self.openml2pytorch_data(X_test, None, task)
                 test_loader = torch.utils.data.DataLoader(
@@ -517,20 +629,9 @@ class OpenMLTrainerModule:
                     pin_memory=self.config.device != "cpu",
                 )
 
-                probabilities = []
-                for batch_idx, inputs in enumerate(test_loader):
-                    inputs = self.config.sanitize(inputs)
-                    # if torch.cuda.is_available():
-                    inputs = inputs.to(self.config.device)
-                    # Perform inference on the batch
-                    proba_y_batch = model_copy(inputs)
-                    proba_y_batch = self.config.predict_proba(proba_y_batch)
-                    proba_y_batch = proba_y_batch.cpu().detach().numpy()
-
-                    probabilities.append(proba_y_batch)
-
-                # Concatenate probabilities from all batches
-                proba_y = np.concatenate(probabilities, axis=0)
+                proba_y = self.pred_test(
+                    task, self.model, test_loader, self.config.predict_proba
+                )
 
             except AttributeError:
                 if task.class_labels is not None:
@@ -577,12 +678,30 @@ class OpenMLTrainerModule:
             raise TypeError(type(task))
 
         # Convert model to onnx
-        onnx_ = self._onnx_export(model_copy)
+        onnx_ = self._onnx_export(self.model)
 
         global last_models
         last_models = onnx_
 
         return pred_y, proba_y, self.user_defined_measures, None
+
+    def pred_test(self, task, model_copy, test_loader, predict_func):
+        probabilities = []
+        for batch_idx, inputs in enumerate(test_loader):
+            inputs = self.config.sanitize(inputs)
+            # if torch.cuda.is_available():
+            inputs = inputs.to(self.config.device)
+
+            # Perform inference on the batch
+            pred_y_batch = model_copy(inputs)
+            pred_y_batch = predict_func(pred_y_batch, task)
+            pred_y_batch = pred_y_batch.cpu().detach().numpy()
+
+            probabilities.append(pred_y_batch)
+
+            # Concatenate probabilities from all batches
+        pred_y = np.concatenate(probabilities, axis=0)
+        return pred_y
 
     def _onnx_export(self, model_copy):
         f = io.BytesIO()
