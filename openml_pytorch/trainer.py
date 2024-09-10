@@ -1,9 +1,10 @@
 import logging
+import re
 from types import SimpleNamespace
 import warnings
 import numpy as np
 import torch
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Iterable, List, Optional, Tuple, Union
 from collections import OrderedDict
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
@@ -23,6 +24,19 @@ from .data import OpenMLImageDataset
 from openml.exceptions import PyOpenMLError
 from types import SimpleNamespace
 
+
+def listify(o):
+    if o is None: return [] 
+    if isinstance(o, list): return o
+    if isinstance(o, str): return [o]
+    if isinstance(o, Iterable): return list(o)
+    return [o]
+
+_camel_re1 = re.compile('(.)([A-Z][a-z]+)')
+_camel_re2 = re.compile('([a-z0-9])([A-Z])')
+def camel2snake(name):
+    s1 = re.sub(_camel_re1, r'\1_\2', name)
+    return re.sub(_camel_re2, r'\1_\2', s1).lower()
 
 class DefaultConfigGenerator:
     def _default_criterion_gen(self, task: OpenMLTask) -> torch.nn.Module:
@@ -172,94 +186,189 @@ class OpenMLDataModule:
         self.data_config.file_dir = file_dir
         self.data_config.target_mode = target_mode
 
+class Callback():
+    _order = 0
+    def set_runner(self, run): self.run = run
+    def __getattr__(self, k): return getattr(self.run, k)
+    @property
+    def name(self):
+        name = re.sub(r'Callback$', '', self.__class__.__name__)
+        return camel2snake(name or 'callback')
+    def __call__(self, cb_name):
+        f = getattr(self, cb_name, None)
+        if f and f(): return True
+        return False
 
-class Callback:
-    def __init__(self):
-        self.data = None
+class TrainEvalCallback(Callback):
+    def begin_fit(self):
+        self.run.n_epochs = 0
+        self.run.n_iter = 0
+    def after_batch(self):
+        if not self.in_train: return
+        self.run.n_epochs+=1./self.iters
+        self.run.n_iter+=1
+    def begin_epoch(self):
+        self.run.n_epochs = self.epoch
+        self.model.train()
+        self.run.in_train = True
+    def begin_validate(self):
+        self.model.eval()
+        self.run.in_train = False
 
-    def on_train_begin(self):
-        pass
+class CancelTrainException(Exception): pass
+class CancelEpochException(Exception): pass
+class CancelBatchException(Exception): pass
 
-    def on_train_end(self):
-        pass
+class AvgStats():
+    def __init__(self, metrics, in_train): self.metrics, self.in_train = listify(metrics), in_train
+    def reset(self):
+        self.tot_loss, self.count = 0., 0
+        self.tot_mets = [0.]*len(self.metrics)
+    @property
+    def all_stats(self): return [self.tot_loss.item()] + self.tot_mets
+    @property
+    def avg_stats(self): return [o/self.count for o in self.all_stats]
+    
+    def __repr__(self):
+        if not self.count: return ''
+        return f"{'train' if self.in_train else 'valid'}: {self.avg_stats}"
+    def accumulate(self, run):
+        bn = run.xb.shape[0]
+        self.tot_loss+=run.loss*bn
+        self.count+=bn
+        for i, m in enumerate(self.metrics):
+            self.tot_mets[i]+=m(run.pred, run.yb)*bn
 
-    def on_epoch_begin(self):
-        pass
+class AvgStatsCallBack(Callback):
+    def __init__(self, metrics):
+        self.train_stats, self.valid_stats = AvgStats(metrics, True), AvgStats(metrics, False)
+    def begin_epoch(self):
+        self.train_stats.reset()
+        self.valid_stats.reset()
+    def after_loss(self):
+        stats = self.train_stats if self.in_train else self.valid_stats
+        with torch.no_grad(): stats.accumulate(self.run)
+    def after_epoch(self):
+        print(self.train_stats)
+        print(self.valid_stats)
 
-    def on_epoch_end(self):
-        pass
+class Runner():
+    def __init__(self, cbs=None, cb_funcs=None):
+        cbs = listify(cbs)
+        for cbf in listify(cb_funcs):
+            cb = cbf()
+            setattr(self, cb.name, cb)
+            cbs.append(cb)
+        self.stop, self.cbs = False, [TrainEvalCallback()] + cbs
 
-    def on_batch_begin(self):
-        pass
+    @property
+    def opt(self): return self.learn.opt
+    @property
+    def model(self): return self.learn.model
+    @property
+    def loss_func(self): return self.learn.loss_func
+    @property
+    def data(self): return self.learn.data
+    
+    def one_batch(self, xb, yb):
+        try: 
+            self.xb, self.yb = xb, yb
+            self('begin_batch')
+            self.pred = self.model(self.xb)
+            self('after_pred')
+            self.loss = self.loss_func(self.pred, self.yb)
+            self('after_loss')
+            if not self.in_train: return
+            self.loss.backward()
+            self('after_backward')
+            self.opt.step()
+            self('after_step')
+            self.opt.zero_grad()
+        except CancelBatchException: self('after_cancel_batch')
+        finally: self('after_batch')
+    
+    def all_batches(self, dl):
+        self.iters = len(dl)
+        try:
+            for xb, yb in progress_bar(dl, leave=False): self.one_batch(xb, yb)
+        except CancelEpochException: self('after_cancel_epoch')
+    def fit(self, epochs, learn):
+        self.epochs, self.learn, self.loss = epochs, learn, torch.tensor(0.)
+        try: 
+            for cb in self.cbs: cb.set_runner(self)
+            self('begin_fit')
+            for epoch in range(epochs):
+                self.epoch = epoch
+                if not self('begin_epoch'): self.all_batches(self.data.train_dl)
+                with torch.no_grad():
+                    if not self('begin_validate'): self.all_batches(self.data.valid_dl)
+                self('after_epoch')
+        except CancelTrainException: self('after_cancel_train')
+        finally:
+            self('after_fit')
+            self.learn = None
+    def __call__(self, cb_name):
+        res = False
+        for cb in sorted(self.cbs, key=lambda x: x._order): res = cb(cb_name) and res
+        return res
+    
+class Learner():
+    def __init__(self, model, opt, loss_func, data):
+        self.model, self.opt, self.loss_func, self.data = model, opt, loss_func, data
 
-    def on_batch_end(self):
-        pass
+class DataBunch():
+    def __init__(self, train_dl, valid_dl, test_dl = None):
+        self.train_dl, self.valid_dl = train_dl, valid_dl
+        self.test_dl = test_dl
 
-    def on_loss_begin(self):
-        pass
+    @property
+    def train_ds(self): return self.train_dl.dataset
+    
+    @property
+    def valid_ds(self): return self.valid_dl.dataset
 
-    def on_loss_end(self):
-        pass
+    @property
+    def test_ds(self): return self.test_dl.dataset
 
-    def on_opt_step_begin(self):
-        pass
+# def get_data(train_idx, valid_idx):
+#     x_train_ds = torch.tensor(train_x[train_idx], dtype=torch.long).to(device)
+#     y_train_ds = torch.tensor(train_y[train_idx, np.newaxis], dtype=torch.float32).to(device)
+#     x_val_ds = torch.tensor(train_x[valid_idx], dtype=torch.long).to(device)
+#     y_val_ds = torch.tensor(train_y[valid_idx, np.newaxis], dtype=torch.float32).to(device)
+#     train_ds = torch.utils.data.TensorDataset(x_train_ds, y_train_ds)
+#     valid_ds = torch.utils.data.TensorDataset(x_val_ds, y_val_ds)
+#     train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+#     valid_dl = DataLoader(valid_ds, batch_size=batch_size, shuffle=False)
+#     data = DataBunch(train_dl, valid_dl)
+#     return data
+# loss_fn = nn.BCEWithLogitsLoss(reduction='sum')
+# def get_learner(train_idx, valid_idx):
+#     data = get_data(train_idx, valid_idx)
+#     learn = Learner(*get_model(data), loss_fn, data=data)
+#     return learn
+# def train_and_eval():
+#     test_preds = np.zeros(len(test_x))
+#     for fold, (train_idx, valid_idx) in enumerate(splits):
+#         print('Fold:', fold)
+#         torch.cuda.empty_cache()
+#         learn = get_learner(train_idx, valid_idx)
+#         gc.collect()
+#         run = Runner(cb_funcs=cbfs)
+#         learn.model.train()
+#         run.fit(4, learn)
+#         learn.model.eval()
+#         test_preds_fold = np.zeros(len(test_dl.dataset))
+#         for i, (x_batch,) in enumerate(test_dl):
+#             with torch.no_grad():
+#                 y_pred = learn.model(x_batch).detach()
+#             test_preds_fold[i*batch_size:(i+1)*batch_size] = sigmoid(y_pred.cpu().numpy())[:, 0]
+#         test_preds+=test_preds_fold/len(splits)
+#         del(learn)
+#         gc.collect()
+#         print(f'Test {fold} added')
+#     print('Training Completed')
+#     return test_preds
 
-    def on_opt_step_end(self):
-        pass
-
-    def on_scheduler_step_begin(self):
-        pass
-
-    def on_scheduler_step_end(self):
-        pass
-
-
-class LoggingCallback(Callback):
-    def __init__(self, logger: logging.Logger, print_output: bool = False):
-        super().__init__()
-        self.logger = logger
-        self.print_output = print_output
-
-    def log_or_print(self, message: str):
-        if self.print_output:
-            print(message)
-        self.logger.info(message)
-
-    def on_train_begin(self):
-        self.log_or_print("Training started")
-
-    def on_train_end(self):
-        self.log_or_print("Training ended")
-
-    def on_epoch_begin(self):
-        self.log_or_print("Epoch started")
-
-    def on_epoch_end(self):
-        self.log_or_print("Epoch ended")
-
-    def on_batch_begin(self):
-        self.log_or_print("Batch started")
-
-    def on_batch_end(self):
-        self.log_or_print("Batch ended")
-
-    def on_loss_begin(self):
-        self.log_or_print("Loss calculation started")
-
-    def on_loss_end(self):
-        self.log_or_print("Loss calculation ended")
-
-    def on_opt_step_begin(self):
-        self.log_or_print("Optimizer step started")
-
-    def on_opt_step_end(self):
-        self.log_or_print("Optimizer step ended")
-
-    def on_scheduler_step_begin(self):
-        self.log_or_print("Scheduler step started")
-
-    def on_scheduler_step_end(self):
-        self.log_or_print("Scheduler step ended")
 
 
 class OpenMLTrainerModule:
@@ -283,7 +392,7 @@ class OpenMLTrainerModule:
         self.logger: logging.Logger = logging.getLogger(__name__)
 
         self.user_defined_measures = OrderedDict()
-        self.callbacks.append(LoggingCallback(self.logger, print_output=False))
+        # self.callbacks.append(LoggingCallback(self.logger, print_output=False))
         self.loss = 0
         self.training_state = True
 
@@ -380,8 +489,73 @@ class OpenMLTrainerModule:
         for obs, prediction_idx in enumerate(y):
             result[obs][prediction_idx] = 1.0
         return result
+    
+    def get_data(self,X_train:pd.DataFrame, y_train:Optional[pd.Series], X_test: pd.DataFrame, task):
+        from sklearn.model_selection import train_test_split
 
-    # def run_model_on_fold(self, model, task, X_train, rep_no, fold_no, y_train, X_test):
+        # TODO: Here we're assuming that X has a label column, this won't work in general
+
+        # train/val loader
+        X_train_train, x_val, y_train_train, y_val = train_test_split(
+            X_train,
+            y_train,
+            test_size=self.config.validation_split,
+            shuffle=True,
+            stratify=y_train,
+            random_state=0,
+        )
+        train, label_mapping = self.openml2pytorch_data(
+            X_train_train, y_train_train, task
+        )
+        train_loader = torch.utils.data.DataLoader(
+            train,
+            batch_size=self.config.batch_size,
+            shuffle=True,
+            pin_memory=self.pin_memory,
+        )
+
+        val, _ = self.openml2pytorch_data(x_val, None, task)
+        val_loader = torch.utils.data.DataLoader(
+            val,
+            batch_size=self.config.batch_size,
+            shuffle=False,
+            pin_memory=self.pin_memory,
+        )
+
+        # test loader
+        if isinstance(task, OpenMLClassificationTask):
+            # Convert class labels to numerical indices
+
+            x_train_labels = (
+                X_train_train["encoded_labels"]
+                if self.config.perform_validation
+                else (
+                    X_train["Class_encoded"]
+                    if "Class_encoded" in X_train
+                    else X_train["encoded_labels"]
+                )
+            )
+            model_classes = np.sort(x_train_labels.astype("int").unique())
+
+        # In supervised learning this returns the predictions for Y
+        if isinstance(task, OpenMLSupervisedTask):
+            # name = task.get_dataset().name
+            # dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name
+
+            test, _ = self.openml2pytorch_data(X_test, None, task)
+            test_loader = torch.utils.data.DataLoader(
+                test,
+                batch_size=self.config.batch_size,
+                shuffle=False,
+                pin_memory=self.config.device != "cpu",
+            )
+        
+        else:
+            raise ValueError(task)
+        
+        return train_loader, val_loader, test_loader, label_mapping, model_classes
+
+
     def run_model_on_fold(
         self,
         model: torch.nn.Module,
@@ -402,10 +576,10 @@ class OpenMLTrainerModule:
                 self.fold_no = fold_no
                 self.rep_no = rep_no
 
-                self.optimizer = self.config.optimizer_gen(self.model, task)(
+                self.opt = self.config.optimizer_gen(self.model, task)(
                     self.model.parameters()
                 )
-                self.scheduler = self.config.scheduler_gen(self.optimizer, task)
+                # self.scheduler = self.config.scheduler_gen(self.opt, task)
 
                 self.criterion = self.config.criterion_gen(task)
                 self.pin_memory = False
@@ -415,50 +589,11 @@ class OpenMLTrainerModule:
                     self.criterion = self.criterion.to(self.config.device)
                     self.pin_memory = True
 
-                if self.config.perform_validation:
-                    from sklearn.model_selection import train_test_split
-
-                    # TODO: Here we're assuming that X has a label column, this won't work in general
-                    X_train_train, x_val, y_train_train, y_val = train_test_split(
-                        X_train,
-                        y_train,
-                        test_size=self.config.validation_split,
-                        shuffle=True,
-                        stratify=y_train,
-                        random_state=0,
-                    )
-                    train, label_mapping = self.openml2pytorch_data(
-                        X_train_train, y_train_train, task
-                    )
-                    train_loader = torch.utils.data.DataLoader(
-                        train,
-                        batch_size=self.config.batch_size,
-                        shuffle=True,
-                        pin_memory=self.pin_memory,
-                    )
-
-                    val, _ = self.openml2pytorch_data(x_val, None, task)
-                    val_loader = torch.utils.data.DataLoader(
-                        val,
-                        batch_size=self.config.batch_size,
-                        shuffle=False,
-                        pin_memory=self.pin_memory,
-                    )
-
-                else:
-
-                    train, label_mapping = self.openml2pytorch_data(
-                        X_train, y_train, task
-                    )
-                    train_loader = torch.utils.data.DataLoader(
-                        train,
-                        batch_size=self.config.batch_size,
-                        shuffle=True,
-                        pin_memory=self.pin_memory,
-                    )
-
                 # we can disable tqdm but not enable it because that is how the API works. self.config.verbose is True by default. (So we need the opposite of the user input)
                 disable_progress_bar = not self.config.verbose
+
+                train_loader, val_loader, test_loader, label_mapping, model_classes = self.get_data(X_train, y_train, X_test, task)
+                
 
                 self.call_callbacks("on_train_begin")
                 for epoch in tqdm(
@@ -493,7 +628,7 @@ class OpenMLTrainerModule:
                                 self.loss = self.criterion(outputs, labels)
                                 self.loss.backward()
                                 self.call_callbacks("on_loss_end")
-                                self.optimizer.zero_grad()
+                                self.opt.zero_grad()
                                 return self.loss
 
                             if labels.dtype != torch.int64:
@@ -502,10 +637,10 @@ class OpenMLTrainerModule:
                                 )
 
                             self.call_callbacks("on_opt_step_begin")
-                            self.loss_opt = self.optimizer.step(_optimizer_step)
+                            self.loss_opt = self.opt.step(_optimizer_step)
                             self.call_callbacks("on_opt_step_end")
 
-                            self.scheduler.step(self.loss_opt)
+                            # self.scheduler.step(self.loss_opt)
 
                             predicted = self.model(inputs)
                             predicted = self.config.predict(predicted, task)
@@ -538,44 +673,43 @@ class OpenMLTrainerModule:
                             self.call_callbacks("on_batch_end")
 
                     # validation phase
-                    if self.config.perform_validation:
 
-                        self.model.eval()
-                        correct_val = 0
-                        incorrect_val = 0
-                        val_loss = 0
+                    self.model.eval()
+                    correct_val = 0
+                    incorrect_val = 0
+                    val_loss = 0
 
-                        with torch.no_grad():
-                            for inputs_val, labels_val in enumerate(val_loader):
+                    with torch.no_grad():
+                        for inputs_val, labels_val in enumerate(val_loader):
 
-                                # if torch.cuda.is_available():
-                                inputs_val = inputs.to(self.config.device)
-                                labels_val = labels.to(self.config.device)
-                                outputs_val = self.model(inputs_val)
-                                if labels_val.dtype != torch.int64:
-                                    labels_val = torch.tensor(
-                                        labels_val,
-                                        dtype=torch.long,
-                                        device=labels.device,
-                                    )
-                                loss_val = self.criterion(outputs_val, labels_val)
-
-                                predicted_val = self.config.predict(outputs_val, task)
-                                correct_val += (
-                                    (predicted_val == labels_val).sum().item()
+                            # if torch.cuda.is_available():
+                            inputs_val = inputs.to(self.config.device)
+                            labels_val = labels.to(self.config.device)
+                            outputs_val = self.model(inputs_val)
+                            if labels_val.dtype != torch.int64:
+                                labels_val = torch.tensor(
+                                    labels_val,
+                                    dtype=torch.long,
+                                    device=labels.device,
                                 )
-                                incorrect_val += (
-                                    (predicted_val != labels_val).sum().item()
-                                )
+                            loss_val = self.criterion(outputs_val, labels_val)
 
-                                val_loss += loss_val.item()
+                            predicted_val = self.config.predict(outputs_val, task)
+                            correct_val += (
+                                (predicted_val == labels_val).sum().item()
+                            )
+                            incorrect_val += (
+                                (predicted_val != labels_val).sum().item()
+                            )
 
-                        accuracy_val = correct_val / (correct_val + incorrect_val)
+                            val_loss += loss_val.item()
 
-                        # Print validation metrics
-                        print(
-                            f"Epoch: {epoch + 1}, Validation Loss: {val_loss / len(val_loader):.3f}, Validation Accuracy: {accuracy_val:.3f}"
-                        )
+                    accuracy_val = correct_val / (correct_val + incorrect_val)
+
+                    # Print validation metrics
+                    print(
+                        f"Epoch: {epoch + 1}, Validation Loss: {val_loss / len(val_loader):.3f}, Validation Accuracy: {accuracy_val:.3f}"
+                    )
                     self.call_callbacks("on_epoch_end")
                 self.call_callbacks("on_train_end")
 
@@ -583,19 +717,19 @@ class OpenMLTrainerModule:
             # typically happens when training a regressor8 on classification task
             raise PyOpenMLError(str(e))
 
-        if isinstance(task, OpenMLClassificationTask):
-            # Convert class labels to numerical indices
+        # if isinstance(task, OpenMLClassificationTask):
+        #     # Convert class labels to numerical indices
 
-            x_train_labels = (
-                X_train_train["encoded_labels"]
-                if self.config.perform_validation
-                else (
-                    X_train["Class_encoded"]
-                    if "Class_encoded" in X_train
-                    else X_train["encoded_labels"]
-                )
-            )
-            model_classes = np.sort(x_train_labels.astype("int").unique())
+        #     x_train_labels = (
+        #         X_train_train["encoded_labels"]
+        #         if self.config.perform_validation
+        #         else (
+        #             X_train["Class_encoded"]
+        #             if "Class_encoded" in X_train
+        #             else X_train["encoded_labels"]
+        #         )
+        #     )
+        #     model_classes = np.sort(x_train_labels.astype("int").unique())
             # model_classes = np.amax(y_train)
 
         # In supervised learning this returns the predictions for Y
@@ -605,13 +739,13 @@ class OpenMLTrainerModule:
             # name = task.get_dataset().name
             # dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name
 
-            test, _ = self.openml2pytorch_data(X_test, None, task)
-            test_loader = torch.utils.data.DataLoader(
-                test,
-                batch_size=self.config.batch_size,
-                shuffle=False,
-                pin_memory=self.config.device != "cpu",
-            )
+            # test, _ = self.openml2pytorch_data(X_test, None, task)
+            # test_loader = torch.utils.data.DataLoader(
+            #     test,
+            #     batch_size=self.config.batch_size,
+            #     shuffle=False,
+            #     pin_memory=self.config.device != "cpu",
+            # )
             pred_y = self.pred_test(task, self.model, test_loader, self.config.predict)
         else:
             raise ValueError(task)
@@ -621,13 +755,13 @@ class OpenMLTrainerModule:
             try:
                 self.model.eval()
 
-                test, _ = self.openml2pytorch_data(X_test, None, task)
-                test_loader = torch.utils.data.DataLoader(
-                    test,
-                    batch_size=self.config.batch_size,
-                    shuffle=True,
-                    pin_memory=self.config.device != "cpu",
-                )
+                # test, _ = self.openml2pytorch_data(X_test, None, task)
+                # test_loader = torch.utils.data.DataLoader(
+                #     test,
+                #     batch_size=self.config.batch_size,
+                #     shuffle=True,
+                #     pin_memory=self.config.device != "cpu",
+                # )
 
                 proba_y = self.pred_test(
                     task, self.model, test_loader, self.config.predict_proba
