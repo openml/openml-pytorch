@@ -2,12 +2,12 @@ from .extension import PytorchExtension
 from . import config
 from . import layers
 from . import trainer
-from . import data
+from . import custom_datasets
 from openml.extensions import register_extension
 
 
 
-__all__ = ['PytorchExtension', 'layers','add_onnx_to_run', 'trainer', 'data', 'config']
+__all__ = ['PytorchExtension', 'layers','add_onnx_to_run', 'trainer', 'custom_datasets', 'config']
 
 register_extension(PytorchExtension)
 

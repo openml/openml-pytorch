@@ -12,6 +12,7 @@ onnx = "^1.16.2"
 openml = "^0.14.2"
 numpy = "<2.0.0"
 matplotlib = "^3.9.2"
+tensorboard = "^2.17.1"
 
 
 [build-system]

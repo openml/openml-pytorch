@@ -40,3 +40,26 @@ class OpenMLImageDataset(Dataset):
             return image, label
         else:
             return image
+
+class OpenMLTabularDataset(Dataset):
+    def __init__(self, annotations_df, target_col = None):
+        self.data = annotations_df
+        self.target_col_name = target_col
+        self.data["encoded_labels"] = preprocessing.LabelEncoder().fit_transform(self.data[target_col])
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        # x is the input data, y is the target value from the target column
+        x = self.data.iloc[idx, :]
+        if self.target_col_name is not None:
+            y = x[self.target_col_name]
+            x = x.drop(self.target_col_name)
+            x = torch.tensor(x)
+            y = torch.tensor(y)
+            return x, y
+        else:
+            x = torch.tensor(x)
+            return x
+       
