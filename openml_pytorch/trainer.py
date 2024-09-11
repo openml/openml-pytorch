@@ -28,96 +28,7 @@ from types import SimpleNamespace
 import matplotlib.pyplot as plt
 from functools import partial
 import math
-
-def annealer(f):
-    def _inner(start, end): return partial(f, start, end)
-    return _inner
-
-@annealer
-def sched_lin(start, end, pos): return start + pos*(end-start)
-
-@annealer
-def sched_cos(start, end, pos): return start + (1+math.cos(math.pi*(1-pos)))*(end-start)/2
-
-@annealer
-def sched_no(start, end, pos): return start
-
-@annealer
-def sched_exp(start, end, pos): return start*(end/start)**pos
-
-torch.Tensor.ndim = property(lambda x: len(x.shape))
-
-def combine_scheds(pcts, scheds):
-    assert sum(pcts)==1.
-    pcts = torch.tensor([0] + listify(pcts))
-    assert torch.all(pcts>=0)
-    pcts = torch.cumsum(pcts, 0)
-    def _inner(pos):
-        idx = (pos>=pcts).nonzero().max()
-        actual_pos = (pos-pcts[idx])/(pcts[idx+1]-pcts[idx])
-        return scheds[idx](actual_pos)
-    return _inner
-
-# def cos_1cycle_anneal(start, high, end):
-#     return [sched_cos(start, high), sched_cos(high, end)]
-def accuracy(out, yb): return (torch.argmax(out, dim=1)==yb.long()).float().mean()
-
-class Callback():
-    _order = 0
-    def set_runner(self, run): self.run = run
-    def __getattr__(self, k): return getattr(self.run, k)
-    @property
-    def name(self):
-        name = re.sub(r'Callback$', '', self.__class__.__name__)
-        return camel2snake(name or 'callback')
-    def __call__(self, cb_name):
-        f = getattr(self, cb_name, None)
-        if f and f(): return True
-        return False
-
-class ParamScheduler(Callback):
-    _order = 1
-    def __init__(self, pname, sched_funcs): self.pname, self.sched_funcs = pname, sched_funcs
-    def begin_fit(self):
-        if not isinstance(self.sched_funcs, (list, tuple)):
-            self.sched_funcs = [self.sched_funcs]*len(self.opt.param_groups)
-    def set_param(self):
-        assert len(self.opt.param_groups)==len(self.sched_funcs)
-        for pg, f in zip(self.opt.param_groups, self.sched_funcs):
-            pg[self.pname] = f(self.n_epochs/self.epochs)
-    def begin_batch(self):
-        if self.in_train: self.set_param()
-
-class Recorder(Callback):
-    def begin_fit(self):
-        self.lrs = [[] for _ in self.opt.param_groups]
-        self.losses = []
-    def after_batch(self):
-        if not self.in_train: return
-        for pg, lr in zip(self.opt.param_groups, self.lrs): lr.append(pg['lr'])
-        self.losses.append(self.loss.detach().cpu())
-    
-    def plot_lr(self, pgid=-1): plt.plot(self.lrs[pgid])
-    def plot_loss(self, skip_last=0): plt.plot(self.losse[:len(self.losses)-skip_last])
-    def plot(self, skip_last=0, pgid=-1):
-        losses = [o.item() for o in self.losses]
-        lrs = self.lrs[pgid]
-        n = len(losses)-skip_last
-        plt.xscale('log')
-        plt.plot(lrs[:n], losses[:n])
-
-def listify(o):
-    if o is None: return [] 
-    if isinstance(o, list): return o
-    if isinstance(o, str): return [o]
-    if isinstance(o, Iterable): return list(o)
-    return [o]
-
-_camel_re1 = re.compile('(.)([A-Z][a-z]+)')
-_camel_re2 = re.compile('([a-z0-9])([A-Z])')
-def camel2snake(name):
-    s1 = re.sub(_camel_re1, r'\1_\2', name)
-    return re.sub(_camel_re2, r'\1_\2', s1).lower()
+from .callbacks import *
 
 class DefaultConfigGenerator:
     def _default_criterion_gen(self, task: OpenMLTask) -> torch.nn.Module:
@@ -268,61 +179,89 @@ class OpenMLDataModule:
         self.data_config.target_mode = target_mode
 
 
-
 class TrainEvalCallback(Callback):
     def begin_fit(self):
         self.run.n_epochs = 0
         self.run.n_iter = 0
+
     def after_batch(self):
-        if not self.in_train: return
-        self.run.n_epochs+=1./self.iters
-        self.run.n_iter+=1
+        if not self.in_train:
+            return
+        self.run.n_epochs += 1.0 / self.iters
+        self.run.n_iter += 1
+
     def begin_epoch(self):
         self.run.n_epochs = self.epoch
         self.model.train()
         self.run.in_train = True
+
     def begin_validate(self):
         self.model.eval()
         self.run.in_train = False
 
-class CancelTrainException(Exception): pass
-class CancelEpochException(Exception): pass
-class CancelBatchException(Exception): pass
 
-class AvgStats():
-    def __init__(self, metrics, in_train): self.metrics, self.in_train = listify(metrics), in_train
+class CancelTrainException(Exception):
+    pass
+
+
+class CancelEpochException(Exception):
+    pass
+
+
+class CancelBatchException(Exception):
+    pass
+
+
+class AvgStats:
+    def __init__(self, metrics, in_train):
+        self.metrics, self.in_train = listify(metrics), in_train
+
     def reset(self):
-        self.tot_loss, self.count = 0., 0
-        self.tot_mets = [0.]*len(self.metrics)
+        self.tot_loss, self.count = 0.0, 0
+        self.tot_mets = [0.0] * len(self.metrics)
+
     @property
-    def all_stats(self): return [self.tot_loss.item()] + self.tot_mets
+    def all_stats(self):
+        return [self.tot_loss.item()] + self.tot_mets
+
     @property
-    def avg_stats(self): return [o/self.count for o in self.all_stats]
-    
+    def avg_stats(self):
+        return [o / self.count for o in self.all_stats]
+
     def __repr__(self):
-        if not self.count: return ''
+        if not self.count:
+            return ""
         return f"{'train' if self.in_train else 'valid'}: {self.avg_stats}"
+
     def accumulate(self, run):
         bn = run.xb.shape[0]
-        self.tot_loss+=run.loss*bn
-        self.count+=bn
+        self.tot_loss += run.loss * bn
+        self.count += bn
         for i, m in enumerate(self.metrics):
-            self.tot_mets[i]+=m(run.pred, run.yb)*bn
+            self.tot_mets[i] += m(run.pred, run.yb) * bn
+
 
 class AvgStatsCallBack(Callback):
     def __init__(self, metrics):
-        self.train_stats, self.valid_stats = AvgStats(metrics, True), AvgStats(metrics, False)
+        self.train_stats, self.valid_stats = AvgStats(metrics, True), AvgStats(
+            metrics, False
+        )
+
     def begin_epoch(self):
         self.train_stats.reset()
         self.valid_stats.reset()
+
     def after_loss(self):
         stats = self.train_stats if self.in_train else self.valid_stats
-        with torch.no_grad(): stats.accumulate(self.run)
+        with torch.no_grad():
+            stats.accumulate(self.run)
+
     def after_epoch(self):
         print(self.train_stats)
         print(self.valid_stats)
 
-class Runner():
+
+class Runner:
     def __init__(self, cbs=None, cb_funcs=None):
         cbs = listify(cbs)
         for cbf in listify(cb_funcs):
@@ -332,82 +271,118 @@ class Runner():
         self.stop, self.cbs = False, [TrainEvalCallback()] + cbs
 
     @property
-    def opt(self): return self.learn.opt
+    def opt(self):
+        return self.learn.opt
+
     @property
-    def model(self): return self.learn.model
+    def model(self):
+        return self.learn.model
+
     @property
-    def criterion(self): return self.learn.criterion
+    def criterion(self):
+        return self.learn.criterion
+
     @property
-    def data(self): return self.learn.data
+    def data(self):
+        return self.learn.data
+
     @property
-    def label_mapping(self): return self.learn.label_mapping
+    def label_mapping(self):
+        return self.learn.label_mapping
+
     @property
-    def model_classes(self): return self.learn.model_classes
-    
+    def model_classes(self):
+        return self.learn.model_classes
+
     def one_batch(self, xb, yb):
-        try: 
+        try:
             self.xb, self.yb = xb, yb
             self.xb = self.xb.to(self.learn.device)
             self.yb = self.yb.to(self.learn.device)
             # Below two lines are hack to convert model to onnx
             global sample_input
             sample_input = self.xb
-            self('begin_batch')
+            self("begin_batch")
             self.pred = self.model(self.xb)
-            self('after_pred')
+            self("after_pred")
             self.loss = self.criterion(self.pred, self.yb)
-            self('after_loss')
-            if not self.in_train: return
+            self("after_loss")
+            if not self.in_train:
+                return
             self.loss.backward()
-            self('after_backward')
+            self("after_backward")
             self.opt.step()
-            self('after_step')
+            self("after_step")
             self.opt.zero_grad()
-        except CancelBatchException: self('after_cancel_batch')
-        finally: self('after_batch')
-    
+        except CancelBatchException:
+            self("after_cancel_batch")
+        finally:
+            self("after_batch")
+
     def all_batches(self, dl):
         self.iters = len(dl)
         try:
-            for xb, yb in tqdm(dl, leave=False): self.one_batch(xb, yb)
-        except CancelEpochException: self('after_cancel_epoch')
+            for xb, yb in tqdm(dl, leave=False):
+                self.one_batch(xb, yb)
+        except CancelEpochException:
+            self("after_cancel_epoch")
+
     def fit(self, epochs, learn):
-        self.epochs, self.learn, self.loss = epochs, learn, torch.tensor(0.)
-        try: 
-            for cb in self.cbs: cb.set_runner(self)
-            self('begin_fit')
+        self.epochs, self.learn, self.loss = epochs, learn, torch.tensor(0.0)
+        try:
+            for cb in self.cbs:
+                cb.set_runner(self)
+            self("begin_fit")
             for epoch in range(epochs):
                 self.epoch = epoch
-                if not self('begin_epoch'): self.all_batches(self.data.train_dl)
+                if not self("begin_epoch"):
+                    self.all_batches(self.data.train_dl)
                 with torch.no_grad():
-                    if not self('begin_validate'): self.all_batches(self.data.valid_dl)
-                self('after_epoch')
-        except CancelTrainException: self('after_cancel_train')
+                    if not self("begin_validate"):
+                        self.all_batches(self.data.valid_dl)
+                self("after_epoch")
+        except CancelTrainException:
+            self("after_cancel_train")
         finally:
-            self('after_fit')
+            self("after_fit")
             self.learn = None
+
     def __call__(self, cb_name):
         res = False
-        for cb in sorted(self.cbs, key=lambda x: x._order): res = cb(cb_name) and res
+        for cb in sorted(self.cbs, key=lambda x: x._order):
+            res = cb(cb_name) and res
         return res
-    
-class Learner():
-    def __init__(self, model, opt, criterion, data, label_mapping, model_classes):
-        self.model, self.opt, self.criterion, self.data, self.label_mapping, self.model_classes = model, opt, criterion, data, label_mapping, model_classes
 
-class DataBunch():
-    def __init__(self, train_dl, valid_dl, test_dl = None):
+
+class Learner:
+    def __init__(self, model, opt, criterion, data, label_mapping, model_classes):
+        (
+            self.model,
+            self.opt,
+            self.criterion,
+            self.data,
+            self.label_mapping,
+            self.model_classes,
+        ) = (model, opt, criterion, data, label_mapping, model_classes)
+
+
+class DataBunch:
+    def __init__(self, train_dl, valid_dl, test_dl=None):
         self.train_dl, self.valid_dl = train_dl, valid_dl
         self.test_dl = test_dl
 
     @property
-    def train_ds(self): return self.train_dl.dataset
-    
-    @property
-    def valid_ds(self): return self.valid_dl.dataset
+    def train_ds(self):
+        return self.train_dl.dataset
 
     @property
-    def test_ds(self): return self.test_dl.dataset
+    def valid_ds(self):
+        return self.valid_dl.dataset
+
+    @property
+    def test_ds(self):
+        return self.test_dl.dataset
+
 
 # def get_data(train_idx, valid_idx):
 #     x_train_ds = torch.tensor(train_x[train_idx], dtype=torch.long).to(device)
@@ -451,7 +426,6 @@ class DataBunch():
 #     return test_preds
 
 
-
 class OpenMLTrainerModule:
     def __init__(
         self,
@@ -477,7 +451,8 @@ class OpenMLTrainerModule:
         self.loss = 0
         self.training_state = True
 
-    def sigmoid(self,x): return 1/(1+np.exp(-x)) 
+    def sigmoid(self, x):
+        return 1 / (1 + np.exp(-x))
 
     def call_callbacks(self, method_name):
         for callback in self.callbacks:
@@ -572,8 +547,14 @@ class OpenMLTrainerModule:
         for obs, prediction_idx in enumerate(y):
             result[obs][prediction_idx] = 1.0
         return result
-    
-    def get_data(self,X_train:pd.DataFrame, y_train:Optional[pd.Series], X_test: pd.DataFrame, task):
+
+    def get_data(
+        self,
+        X_train: pd.DataFrame,
+        y_train: Optional[pd.Series],
+        X_test: pd.DataFrame,
+        task,
+    ):
         from sklearn.model_selection import train_test_split
 
         # TODO: Here we're assuming that X has a label column, this won't work in general
@@ -633,12 +614,15 @@ class OpenMLTrainerModule:
                 shuffle=False,
                 # pin_memory=self.config.device != "cpu",
             )
-        
+
         else:
             raise ValueError(task)
-        
-        return DataBunch(train_loader, val_loader, test_loader), label_mapping, model_classes
-    
+
+        return (
+            DataBunch(train_loader, val_loader, test_loader),
+            label_mapping,
+            model_classes,
+        )
 
     def run_model_on_fold(
         self,
@@ -656,12 +640,16 @@ class OpenMLTrainerModule:
         phases = [0.2, 0.8]
         scheds = combine_scheds(phases, [sched_cos(1e-4, 5e-3), sched_cos(5e-3, 1e-3)])
 
-        self.cbfs = [Recorder, partial(AvgStatsCallBack, accuracy), partial(ParamScheduler, 'lr', scheds)]
+        self.cbfs = [
+            Recorder,
+            partial(AvgStatsCallBack, accuracy),
+            partial(ParamScheduler, "lr", scheds),
+        ]
         try:
             if isinstance(task, OpenMLSupervisedTask) or isinstance(
                 task, OpenMLClassificationTask
             ):
-  
+
                 self.fold_no = fold_no
                 self.rep_no = rep_no
 
@@ -684,10 +672,19 @@ class OpenMLTrainerModule:
 
                 # train_loader, val_loader, test_loader, label_mapping, model_classes = self.get_data(X_train, y_train, X_test, task)
                 # X_train = self.config.sanitize(X_train)
-                data, label_mapping, model_classes = self.get_data(X_train, y_train, X_test, task)
+                data, label_mapping, model_classes = self.get_data(
+                    X_train, y_train, X_test, task
+                )
                 test_preds = np.zeros(len(X_test))
 
-                self.learn = Learner(self.model, self.opt, self.criterion, data, label_mapping, model_classes)
+                self.learn = Learner(
+                    self.model,
+                    self.opt,
+                    self.criterion,
+                    data,
+                    label_mapping,
+                    model_classes,
+                )
                 self.learn.device = self.device
                 self.learn.model.to(self.device)
                 gc.collect()
@@ -695,12 +692,12 @@ class OpenMLTrainerModule:
                 # torch.cuda.empty_cache()
                 # torch.clear_autocast_cache()
 
-                run = Runner(cb_funcs=self.cbfs)
+                self.runner = Runner(cb_funcs=self.cbfs)
                 self.learn.model.train()
-                run.fit(epochs=self.config.epoch_count, learn = self.learn)
+                self.runner.fit(epochs=self.config.epoch_count, learn=self.learn)
                 self.learn.model.eval()
 
-                print("Loss" ,run.loss)
+                print("Loss", self.runner.loss)
 
                 # for i, (x_batch,) in enumerate(data.test_dl):
                 #     with torch.no_grad():
@@ -710,12 +707,11 @@ class OpenMLTrainerModule:
                 # batch_size = 4
 
                 # test fold
-                
+
                 # for i, (x_batch,) in enumerate(data.test_dl):
                 #     with torch.no_grad():
                 #         y_pred = learn.model(x_batch).detach()
-                    # test_preds[i*batch_size]
-
+                # test_preds[i*batch_size]
 
                 # self.call_callbacks("on_train_begin")
                 # for epoch in tqdm(
@@ -852,7 +848,7 @@ class OpenMLTrainerModule:
         #         )
         #     )
         #     model_classes = np.sort(x_train_labels.astype("int").unique())
-            # model_classes = np.amax(y_train)
+        # model_classes = np.amax(y_train)
 
         # In supervised learning this returns the predictions for Y
         if isinstance(task, OpenMLSupervisedTask):
