@@ -224,17 +224,23 @@ class OpenMLDataModule:
             return data, label_mapping
         
         elif self.data_config.type_of_data == "dataframe":
-            X = X.to_numpy()
-            y = y.to_numpy()
+            # X = X.to_numpy()
+            # if y is not None:
+                # y = y.to_numpy()
+            # else:
+                # y = np.zeros(X.shape[0])
             # encode labels
-            label_encoder = preprocessing.LabelEncoder().fit(y)
-            y = label_encoder.transform(y)
-            X = torch.from_numpy(X).float()
-            y = torch.from_numpy(y).float()
-            data = torch.utils.data.TensorDataset(X, y)
-            label_mapping = {
-                index: label for index, label in enumerate(label_encoder.classes_)
-            }
+            # label_encoder = preprocessing.LabelEncoder().fit(y)
+            # y = label_encoder.transform(y)
+            # X = torch.from_numpy(X).float()
+            # y = torch.from_numpy(y).float()
+            # data = torch.utils.data.TensorDataset(X, y)
+
+            data = OpenMLTabularDataset(
+                annotations_df=X,
+                y = y,
+            )
+            label_mapping = data.label_mapping
             return data, label_mapping
 
             
@@ -313,19 +319,30 @@ class OpenMLDataModule:
                     )
                 )
                 model_classes = np.sort(x_train_labels.astype("int").unique())
+            elif self.data_config.type_of_data == "dataframe":
+                model_classes = np.amax(y_train)
 
         # In supervised learning this returns the predictions for Y
         if isinstance(task, OpenMLSupervisedTask):
             # name = task.get_dataset().name
             # dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name
+            if self.data_config.type_of_data == "image":
+                test, _ = self.openml2pytorch_data(X_test, None, task)
+                test_loader = torch.utils.data.DataLoader(
+                    test,
+                    batch_size=self.data_config.batch_size,
+                    shuffle=False,
+                    # pin_memory=self.pin_memory,
+                )
+            elif self.data_config.type_of_data == "dataframe":
+                test, _ = self.openml2pytorch_data(X_test,None , task)
+                test_loader = torch.utils.data.DataLoader(
+                    test,
+                    batch_size=self.data_config.batch_size,
+                    shuffle=False,
+                    # pin_memory=self.pin_memory,
+                )
 
-            test, _ = self.openml2pytorch_data(X_test, None, task)
-            test_loader = torch.utils.data.DataLoader(
-                test,
-                batch_size=self.data_config.batch_size,
-                shuffle=False,
-                # pin_memory=self.config.device != "cpu",
-            )
 
         else:
             raise ValueError(task)
@@ -718,22 +735,41 @@ class OpenMLTrainerModule:
         return pred_y, proba_y, self.user_defined_measures, None
 
     def pred_test(self, task, model_copy, test_loader, predict_func):
-        probabilities = []
-        for batch_idx, inputs in enumerate(test_loader):
-            inputs = self.config.sanitize(inputs)
-            # if torch.cuda.is_available():
-            inputs = inputs.to(self.config.device)
+        if self.config.type_of_data == "image":
+            probabilities = []
+            for batch_idx, inputs in enumerate(test_loader):
+                inputs = self.config.sanitize(inputs)
+                # if torch.cuda.is_available():
+                inputs = inputs.to(self.config.device)
 
-            # Perform inference on the batch
-            pred_y_batch = model_copy(inputs)
-            pred_y_batch = predict_func(pred_y_batch, task)
-            pred_y_batch = pred_y_batch.cpu().detach().numpy()
+                # Perform inference on the batch
+                pred_y_batch = model_copy(inputs)
+                pred_y_batch = predict_func(pred_y_batch, task)
+                pred_y_batch = pred_y_batch.cpu().detach().numpy()
 
-            probabilities.append(pred_y_batch)
+                probabilities.append(pred_y_batch)
 
-            # Concatenate probabilities from all batches
-        pred_y = np.concatenate(probabilities, axis=0)
-        return pred_y
+                # Concatenate probabilities from all batches
+            pred_y = np.concatenate(probabilities, axis=0)
+            return pred_y
+        
+        elif self.config.type_of_data == "dataframe":
+            probabilities = []
+            for batch_idx, inputs in enumerate(test_loader):
+                inputs = self.config.sanitize(inputs)
+                # if torch.cuda.is_available():
+                inputs = inputs.to(self.config.device)
+
+                # Perform inference on the batch
+                pred_y_batch = model_copy(inputs)
+                pred_y_batch = predict_func(pred_y_batch, task)
+                pred_y_batch = pred_y_batch.cpu().detach().numpy()
+
+                probabilities.append(pred_y_batch)
+
+                # Concatenate probabilities from all batches
+            pred_y = np.concatenate(probabilities, axis=0)
+            return pred_y
 
     def _onnx_export(self, model_copy):
         f = io.BytesIO()

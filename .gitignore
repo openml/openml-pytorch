@@ -12,3 +12,5 @@ model.onnx
 build/
 dist/
 openml_pytorch.egg-info/
+
+datasets/

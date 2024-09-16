@@ -1,5 +1,6 @@
 import os
 from typing import Any
+import pandas as pd
 from sklearn import preprocessing
 import torch
 from torchvision.io import read_image
@@ -42,10 +43,16 @@ class OpenMLImageDataset(Dataset):
             return image
 
 class OpenMLTabularDataset(Dataset):
-    def __init__(self, annotations_df, target_col = None):
+    def __init__(self, annotations_df, y):
         self.data = annotations_df
-        self.target_col_name = target_col
-        self.data["encoded_labels"] = preprocessing.LabelEncoder().fit_transform(self.data[target_col])
+        # self.target_col_name = target_col
+        self.label_mapping = None
+
+        self.label_mapping = preprocessing.LabelEncoder()
+        try:
+            self.y = self.label_mapping.fit_transform(y)
+        except ValueError:
+            self.y = None
 
     def __len__(self):
         return len(self.data)
@@ -53,13 +60,11 @@ class OpenMLTabularDataset(Dataset):
     def __getitem__(self, idx):
         # x is the input data, y is the target value from the target column
         x = self.data.iloc[idx, :]
-        if self.target_col_name is not None:
-            y = x[self.target_col_name]
-            x = x.drop(self.target_col_name)
-            x = torch.tensor(x)
+        x = torch.tensor(x.values.astype('float32'))
+        if self.y is not None:
+            y = self.y[idx]
             y = torch.tensor(y)
             return x, y
         else:
-            x = torch.tensor(x)
             return x
-       
+            
