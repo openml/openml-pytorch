@@ -185,7 +185,8 @@ class OpenMLDataModule:
         filename_col="Filename",
         file_dir="images",
         target_mode="categorical",
-        transform = None,
+        transform=None,
+        target_column = "encoded_labels",
         **kwargs,
     ):
         self.config_gen = DefaultConfigGenerator()
@@ -197,75 +198,46 @@ class OpenMLDataModule:
         self.data_config.filename_col = filename_col
         self.data_config.file_dir = file_dir
         self.data_config.target_mode = target_mode
+        self.data_config.target_column = target_column
 
-    def openml2pytorch_data(self, X, y, task) -> Any:
-        # convert openml dataset to pytorch compatible dataset
-        if self.data_config.type_of_data == "image":
-            df = X
-            columns_to_use = [self.data_config.filename_col]
 
-            if y is not None:
-                label_encoder = preprocessing.LabelEncoder().fit(y)
-                df.loc[:, "encoded_labels"] = label_encoder.transform(y)
-                label_mapping = {
-                    index: label for index, label in enumerate(label_encoder.classes_)
-                }
-                columns_to_use = [self.data_config.filename_col, "encoded_labels"]
-            else:
-                label_mapping = None
+    # def openml2pytorch_data(self, X, y, task) -> Any:
+    #     # convert openml dataset to pytorch compatible dataset
+    #     if self.data_config.type_of_data == "image":
+    #         df = X
+    #         columns_to_use = [self.data_config.filename_col]
 
-            data = OpenMLImageDataset(
-                image_size=self.data_config.image_size,
-                annotations_df=df[columns_to_use],
-                img_dir=self.data_config.file_dir,
-                transform=self.data_config.transform,
-            )
+    #         if y is not None:
+    #             label_encoder = preprocessing.LabelEncoder().fit(y)
+    #             # check if the labels are already integers
+    #             df.loc[:, self.data_config.target_column] = label_encoder.transform(y)
+    #             label_mapping = {
+    #                 index: label for index, label in enumerate(label_encoder.classes_)
+    #             }
+    #             columns_to_use = [self.data_config.filename_col, self.data_config.target_column]
+    #         else:
+    #             label_mapping = None
 
-            return data, label_mapping
-        
-        elif self.data_config.type_of_data == "dataframe":
-            # X = X.to_numpy()
-            # if y is not None:
-                # y = y.to_numpy()
-            # else:
-                # y = np.zeros(X.shape[0])
-            # encode labels
-            # label_encoder = preprocessing.LabelEncoder().fit(y)
-            # y = label_encoder.transform(y)
-            # X = torch.from_numpy(X).float()
-            # y = torch.from_numpy(y).float()
-            # data = torch.utils.data.TensorDataset(X, y)
+    #         data = OpenMLImageDataset(
+    #             image_size=self.data_config.image_size,
+    #             annotations_df=df[columns_to_use],
+    #             img_dir=self.data_config.file_dir,
+    #             transform=self.data_config.transform,
+    #         )
 
-            data = OpenMLTabularDataset(
-                annotations_df=X,
-                y = y,
-            )
-            label_mapping = data.label_mapping
-            return data, label_mapping
+    #         return data, label_mapping
 
-            
+    #     elif self.data_config.type_of_data == "dataframe":
 
-        # elif self.type_of_data == "tabular":
-        #     df = X
-        #     columns_to_use = df.columns
+    #         data = OpenMLTabularDataset(
+    #             annotations_df=X,
+    #             y=y,
+    #         )
+    #         label_mapping = data.label_mapping
+    #         return data, label_mapping
 
-        #     if y is not None:
-        #         label_encoder = preprocessing.LabelEncoder().fit(y)
-        #         df.loc[:, self.data_config.filename_col] = label_encoder.transform(y)
-        #         label_mapping = {
-        #             index: label for index, label in enumerate(label_encoder.classes_)
-        #         }
-        #         columns_to_use = df.columns
-        #     else:
-        #         label_mapping = None
-
-        #     data = OpenMLTabularDataset(
-        #         annotations_df=df[columns_to_use],
-        #     )
-
-        #     return data, label_mapping
-        else:
-            raise ValueError("Data type not supported")
+    #     else:
+    #         raise ValueError("Data type not supported")
 
     def get_data(
         self,
@@ -278,6 +250,8 @@ class OpenMLDataModule:
         # TODO: Here we're assuming that X has a label column, this won't work in general
 
         # train/val loader
+        if type(y_train) != pd.Series:
+            y_train = pd.Series(y_train)
         X_train_train, x_val, y_train_train, y_val = train_test_split(
             X_train,
             y_train,
@@ -287,9 +261,33 @@ class OpenMLDataModule:
             random_state=0,
         )
 
-        train, label_mapping = self.openml2pytorch_data(
-            X_train_train, y_train_train, task
-        )
+        # train, label_mapping = self.openml2pytorch_data(
+        #     X_train_train, y_train_train, task
+        # )
+        # encode the labels
+        if self.data_config.target_mode == "categorical":
+            label_encoder = preprocessing.LabelEncoder().fit(y_train_train)
+            y_train_train = pd.Series(label_encoder.transform(y_train_train))
+            y_val = pd.Series(label_encoder.transform(y_val))
+
+        if self.data_config.type_of_data == "image":
+            train = OpenMLImageDataset(
+                image_dir= self.data_config.file_dir,
+                X = X_train_train, y = y_train_train, transform_x = self.data_config.transform, image_size=self.data_config.image_size
+            )
+            val = OpenMLImageDataset(
+                image_dir= self.data_config.file_dir,
+                X = x_val, y = y_val, transform_x = self.data_config.transform, image_size=self.data_config.image_size
+            )
+        
+        elif self.data_config.type_of_data == "dataframe":
+            train = OpenMLTabularDataset(
+                X = X_train_train, y = y_train_train
+            )
+            val = OpenMLTabularDataset(
+                X = x_val, y = y_val
+            )
+
         train_loader = torch.utils.data.DataLoader(
             train,
             batch_size=self.data_config.batch_size,
@@ -297,7 +295,7 @@ class OpenMLDataModule:
             # pin_memory=self.pin_memory,
         )
 
-        val, _ = self.openml2pytorch_data(x_val, y_val, task)
+       
         val_loader = torch.utils.data.DataLoader(
             val,
             batch_size=self.data_config.batch_size,
@@ -309,25 +307,23 @@ class OpenMLDataModule:
         if isinstance(task, OpenMLClassificationTask):
             # Convert class labels to numerical indices
             if self.data_config.type_of_data == "image":
-                x_train_labels = (
-                    X_train_train["encoded_labels"]
-                    if self.data_config.perform_validation
-                    else (
-                        X_train["Class_encoded"]
-                        if "Class_encoded" in X_train
-                        else X_train["encoded_labels"]
-                    )
-                )
-                model_classes = np.sort(x_train_labels.astype("int").unique())
+                # check if y_train_train is already encoded
+                # model_classes = np.sort(y_train_train.astype("int").unique())
+                model_classes = label_encoder.classes_
+
             elif self.data_config.type_of_data == "dataframe":
-                model_classes = np.amax(y_train)
+                # model_classes = np.amax(y_train_train)
+                model_classes = label_encoder.classes_
 
         # In supervised learning this returns the predictions for Y
         if isinstance(task, OpenMLSupervisedTask):
             # name = task.get_dataset().name
             # dataset_name = name.split('Meta_Album_')[1] if 'Meta_Album' in name else name
             if self.data_config.type_of_data == "image":
-                test, _ = self.openml2pytorch_data(X_test, None, task)
+                test = OpenMLImageDataset(
+                    image_dir= self.data_config.file_dir,
+                    X = X_test, y = None, transform_x = self.data_config.transform, image_size=self.data_config.image_size)
+
                 test_loader = torch.utils.data.DataLoader(
                     test,
                     batch_size=self.data_config.batch_size,
@@ -335,7 +331,9 @@ class OpenMLDataModule:
                     # pin_memory=self.pin_memory,
                 )
             elif self.data_config.type_of_data == "dataframe":
-                test, _ = self.openml2pytorch_data(X_test,None , task)
+                test = OpenMLTabularDataset(
+                    X = X_test, y = None
+                )
                 test_loader = torch.utils.data.DataLoader(
                     test,
                     batch_size=self.data_config.batch_size,
@@ -343,13 +341,12 @@ class OpenMLDataModule:
                     # pin_memory=self.pin_memory,
                 )
 
-
         else:
             raise ValueError(task)
 
         return (
             DataBunch(train_loader, val_loader, test_loader),
-            label_mapping,
+            # label_mapping,
             model_classes,
         )
 
@@ -448,15 +445,14 @@ class ModelRunner:
 
 
 class Learner:
-    def __init__(self, model, opt, criterion, data, label_mapping, model_classes):
+    def __init__(self, model, opt, criterion, data, model_classes):
         (
             self.model,
             self.opt,
             self.criterion,
             self.data,
-            self.label_mapping,
             self.model_classes,
-        ) = (model, opt, criterion, data, label_mapping, model_classes)
+        ) = (model, opt, criterion, data, model_classes)
 
 
 class DataBunch:
@@ -558,6 +554,10 @@ class OpenMLTrainerModule:
         X_test: pd.DataFrame,
     ) -> Tuple[np.ndarray, Optional[np.ndarray], OrderedDict, Optional[Any]]:
         # self.config.device = "cpu" #FIx this
+        # if task has no class labels, we assign the class labels to be the unique values in the training set
+        if task.class_labels is None:
+            task.class_labels = y_train.unique()
+
 
         self.model = copy.deepcopy(model)
         phases = [0.2, 0.8]
@@ -600,7 +600,7 @@ class OpenMLTrainerModule:
 
                 # train_loader, val_loader, test_loader, label_mapping, model_classes = self.get_data(X_train, y_train, X_test, task)
                 # X_train = self.config.sanitize(X_train)
-                data, label_mapping, model_classes = self.data_module.get_data(
+                data, model_classes = self.data_module.get_data(
                     X_train, y_train, X_test, task
                 )
                 # test_preds = np.zeros(len(X_test))
@@ -610,7 +610,6 @@ class OpenMLTrainerModule:
                     self.opt,
                     self.criterion,
                     data,
-                    label_mapping,
                     model_classes,
                 )
                 self.learn.device = self.device
@@ -627,24 +626,23 @@ class OpenMLTrainerModule:
 
                 print("Loss", self.runner.loss)
 
-
         except AttributeError as e:
             # typically happens when training a regressor8 on classification task
             raise PyOpenMLError(str(e))
 
         # if isinstance(task, OpenMLClassificationTask):
-            # Convert class labels to numerical indices
+        # Convert class labels to numerical indices
 
-            # x_train_labels = (
-            #     X_train_train["encoded_labels"]
-            #     if self.config.perform_validation
-            #     else (
-            #         X_train["Class_encoded"]
-            #         if "Class_encoded" in X_train
-            #         else X_train["encoded_labels"]
-            #     )
-            # )
-            # model_classes = np.sort(x_train_labels.astype("int").unique())
+        # x_train_labels = (
+        #     X_train_train["encoded_labels"]
+        #     if self.config.perform_validation
+        #     else (
+        #         X_train["Class_encoded"]
+        #         if "Class_encoded" in X_train
+        #         else X_train["encoded_labels"]
+        #     )
+        # )
+        # model_classes = np.sort(x_train_labels.astype("int").unique())
         # model_classes = np.amax(y_train)
 
         # In supervised learning this returns the predictions for Y
@@ -689,9 +687,6 @@ class OpenMLTrainerModule:
                     )
                 else:
                     raise ValueError("The task has no class labels")
-
-            if task.class_labels is None:
-                task.class_labels = list(label_mapping.values())
 
             if task.class_labels is not None:
                 if proba_y.shape[1] != len(task.class_labels):
@@ -752,7 +747,7 @@ class OpenMLTrainerModule:
                 # Concatenate probabilities from all batches
             pred_y = np.concatenate(probabilities, axis=0)
             return pred_y
-        
+
         elif self.config.type_of_data == "dataframe":
             probabilities = []
             for batch_idx, inputs in enumerate(test_loader):
