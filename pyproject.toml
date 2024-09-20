@@ -13,6 +13,8 @@ openml = "^0.14.2"
 numpy = "<2.0.0"
 matplotlib = "^3.9.2"
 tensorboard = "^2.17.1"
+tab-transformer-pytorch = "^0.3.0"
+transformers = "^4.44.2"
 
 
 [build-system]

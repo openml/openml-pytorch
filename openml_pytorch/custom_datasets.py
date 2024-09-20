@@ -82,6 +82,11 @@ class OpenMLTabularDataset(Dataset):
 
         self.label_mapping = preprocessing.LabelEncoder()
         try:
+            self.data = self.data.apply(self.label_mapping.fit_transform)
+        except ValueError:
+            pass
+
+        try:
             self.y = self.label_mapping.fit_transform(y)
         except ValueError:
             self.y = None
