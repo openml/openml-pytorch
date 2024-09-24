@@ -9,6 +9,23 @@ from torch.utils.data import Dataset
 import torchvision.transforms as T
 
 class OpenMLImageDataset(Dataset):
+    """
+        Class representing an image dataset from OpenML for use in PyTorch.
+
+        Methods:
+
+            __init__(self, X, y, image_size, image_dir, transform_x=None, transform_y=None)
+                Initializes the dataset with given data, image size, directory, and optional transformations.
+
+            encode_labels(self, y)
+                Encodes string labels into numerical values using LabelEncoder.
+
+            __getitem__(self, idx)
+                Retrieves an image and its corresponding label (if available) from the dataset at the specified index. Applies transformations if provided.
+
+            __len__(self)
+                Returns the total number of images in the dataset.
+    """
     def __init__(self, X, y, image_size, image_dir, transform_x = None, transform_y = None):
         self.X = X
         self.y = y
@@ -17,15 +34,13 @@ class OpenMLImageDataset(Dataset):
         self.transform_x = transform_x
         self.transform_y = transform_y
 
+    @staticmethod
     def encode_labels(self, y):
         label_mapping = preprocessing.LabelEncoder()
         return label_mapping.fit_transform(y)
-    
-    def __len__(self):
-        return len(self.X)
-    
+
     def __getitem__(self, idx):
-        img_name = os.path.join(self.image_dir, self.X.iloc[idx, 0])
+        img_name = str(os.path.join(self.image_dir, self.X.iloc[idx, 0]))
         image = read_image(img_name)
         image = image.float()
         image = T.Resize((self.image_size, self.image_size))(image)
@@ -39,42 +54,27 @@ class OpenMLImageDataset(Dataset):
                 return image, label
         else:
             return image
+    
+    def __len__(self):
+        return len(self.X)
 
-# class OpenMLImageDataset(Dataset):
-#     def __init__(self,image_size, annotations_df, img_dir, transform=None, target_transform=None):
-#         self.img_labels = annotations_df
-#         self.img_dir = img_dir
-#         self.transform = transform
-#         self.target_transform = target_transform
-#         self.image_size = image_size
-#         self.has_labels = 'encoded_labels' in annotations_df.columns
-
-#     def __len__(self):
-#         return len(self.img_labels)
-
-#     def __getitem__(self, idx):
-#         img_path = os.path.join(self.img_dir, self.img_labels.iloc[idx, 0])
-
-#         try:
-#             image = read_image(img_path)
-#         except RuntimeError as error:
-#             # print(f"Error loading image {img_path}: {error}")
-#             # Use a default image        
-#             # from .config import image_size
-#             image = torch.zeros((3, self.image_size, self.image_size), dtype=torch.uint8)
-            
-#         # label = self.img_labels.iloc[idx, 1]
-#         if self.transform is not None:
-#             image = self.transform(image)
-#             image = image.float()
-
-#         if self.has_labels:
-#             label = self.img_labels.iloc[idx, 1]
-#             return image, label
-#         else:
-#             return image
 
 class OpenMLTabularDataset(Dataset):
+    """
+    OpenMLTabularDataset
+
+    A custom dataset class to handle tabular data from OpenML (or any similar tabular dataset).
+    It encodes categorical features and the target column using LabelEncoder from sklearn.
+
+    Methods:
+        __init__(X, y) : Initializes the dataset with the data and the target column.
+                         Encodes the categorical features and target if provided.
+
+        __getitem__(idx): Retrieves the input data and target value at the specified index.
+                          Converts the data to tensors and returns them.
+
+        __len__(): Returns the length of the dataset.
+    """
     def __init__(self, X, y):
         self.data = X
         # self.target_col_name = target_col
@@ -91,9 +91,6 @@ class OpenMLTabularDataset(Dataset):
         except ValueError:
             self.y = None
 
-    def __len__(self):
-        return len(self.data)
-
     def __getitem__(self, idx):
         # x is the input data, y is the target value from the target column
         x = self.data.iloc[idx, :]
@@ -105,3 +102,6 @@ class OpenMLTabularDataset(Dataset):
         else:
             return x
             
+
+    def __len__(self):
+        return len(self.data)
