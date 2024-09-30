@@ -1,17 +1,22 @@
+"""
+This module provides utility functions for evaluating model performance and activation functions.
+It includes functions to compute the accuracy, top-k accuracy of model predictions, and the sigmoid function.
+"""
 import torch
 import numpy as np
 
 
 def accuracy(out, yb):
     """
-    Calculates the accuracy of model predictions.
+
+    Computes the accuracy of model predictions.
 
     Parameters:
-    out: A tensor containing the model's predicted outputs.
-    yb: A tensor containing the actual labels.
+    out (Tensor): The output tensor from the model, containing predicted class scores.
+    yb (Tensor): The ground truth labels tensor.
 
     Returns:
-    The proportion of correct predictions as a float.
+    Tensor: The mean accuracy of the predictions, computed as a float tensor.
     """
     return (torch.argmax(out, dim=1) == yb.long()).float().mean()
 

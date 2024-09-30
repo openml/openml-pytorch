@@ -1,3 +1,6 @@
+"""
+This module defines the Pytorch extension for OpenML-python.
+"""
 from collections import OrderedDict  # noqa: F401
 import copy
 from distutils.version import LooseVersion
