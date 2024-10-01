@@ -20,9 +20,6 @@ class OpenMLImageDataset(Dataset):
             __init__(self, X, y, image_size, image_dir, transform_x=None, transform_y=None)
                 Initializes the dataset with given data, image size, directory, and optional transformations.
 
-            encode_labels(self, y)
-                Encodes string labels into numerical values using LabelEncoder.
-
             __getitem__(self, idx)
                 Retrieves an image and its corresponding label (if available) from the dataset at the specified index. Applies transformations if provided.
 
@@ -36,11 +33,6 @@ class OpenMLImageDataset(Dataset):
         self.image_dir = image_dir
         self.transform_x = transform_x
         self.transform_y = transform_y
-
-    @staticmethod
-    def encode_labels(self, y):
-        label_mapping = preprocessing.LabelEncoder()
-        return label_mapping.fit_transform(y)
 
     def __getitem__(self, idx):
         img_name = str(os.path.join(self.image_dir, self.X.iloc[idx, 0]))
@@ -81,18 +73,22 @@ class OpenMLTabularDataset(Dataset):
     def __init__(self, X, y):
         self.data = X
         # self.target_col_name = target_col
+        for col in self.data.select_dtypes(include=['object', 'category']):
+            # convert to float
+            self.data[col] = self.data[col].astype('category').cat.codes
         self.label_mapping = None
 
-        self.label_mapping = preprocessing.LabelEncoder()
-        try:
-            self.data = self.data.apply(self.label_mapping.fit_transform)
-        except ValueError:
-            pass
+        # self.label_mapping = preprocessing.LabelEncoder()
+        # try:
+        #     self.data = self.data.apply(self.label_mapping.fit_transform)
+        # except ValueError:
+        #     pass
 
-        try:
-            self.y = self.label_mapping.fit_transform(y)
-        except ValueError:
-            self.y = None
+        # try:
+        #     self.y = self.label_mapping.fit_transform(y)
+        # except ValueError:
+        #     self.y = None
+        self.y = y
 
     def __getitem__(self, idx):
         # x is the input data, y is the target value from the target column

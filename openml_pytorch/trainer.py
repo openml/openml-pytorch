@@ -63,7 +63,7 @@ class DefaultConfigGenerator:
     """
 
     @staticmethod
-    def _default_criterion_gen(self, task: OpenMLTask) -> torch.nn.Module:
+    def _default_criterion_gen(task: OpenMLTask) -> torch.nn.Module:
         """
         _default_criterion_gen returns a criterion based on the task type - regressions use
         torch.nn.SmoothL1Loss while classifications use torch.nn.CrossEntropyLoss
@@ -76,21 +76,21 @@ class DefaultConfigGenerator:
             raise ValueError(task)
 
     @staticmethod
-    def _default_optimizer_gen(self, model: torch.nn.Module, _: OpenMLTask):
+    def _default_optimizer_gen(model: torch.nn.Module, _: OpenMLTask):
         """
         _default_optimizer_gen returns the torch.optim.Adam optimizer for the given model
         """
         return torch.optim.Adam
 
     @staticmethod
-    def _default_scheduler_gen(self, optim, _: OpenMLTask) -> Any:
+    def _default_scheduler_gen(optim, _: OpenMLTask) -> Any:
         """
         _default_scheduler_gen returns the torch.optim.lr_scheduler.ReduceLROnPlateau scheduler for the given optimizer
         """
         return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optim)
 
     @staticmethod
-    def _default_predict(self, output: torch.Tensor, task: OpenMLTask) -> torch.Tensor:
+    def _default_predict(output: torch.Tensor, task: OpenMLTask) -> torch.Tensor:
         """
         _default_predict turns the outputs into predictions by returning the argmax of the output tensor for classification tasks, and by flattening the prediction in case of the regression
         """
@@ -105,7 +105,7 @@ class DefaultConfigGenerator:
 
     @staticmethod
     def _default_predict_proba(
-        self, output: torch.Tensor, task: OpenMLTask
+        output: torch.Tensor, task: OpenMLTask
     ) -> torch.Tensor:
         """
         _default_predict_proba turns the outputs into probabilities using softmax
@@ -115,7 +115,7 @@ class DefaultConfigGenerator:
         return output
 
     @staticmethod
-    def _default_sanitize(self, tensor: torch.Tensor) -> torch.Tensor:
+    def _default_sanitize(tensor: torch.Tensor) -> torch.Tensor:
         """
         _default sanitizer replaces NaNs with 1e-6
         """
@@ -126,7 +126,7 @@ class DefaultConfigGenerator:
 
     @staticmethod
     def _default_retype_labels(
-        self, tensor: torch.Tensor, task: OpenMLTask
+         tensor: torch.Tensor, task: OpenMLTask
     ) -> torch.Tensor:
         """
         _default_retype_labels changes the type of the tensor to long for classification tasks and to float for regression tasks
@@ -138,7 +138,6 @@ class DefaultConfigGenerator:
         else:
             raise ValueError(task)
 
-    @staticmethod
     def get_device(
         self,
     ):
@@ -153,7 +152,7 @@ class DefaultConfigGenerator:
             device = torch.device("cpu")
 
         return device
-    @staticmethod
+
     def default_image_transform(self):
         return Compose(
             [
@@ -361,6 +360,10 @@ class OpenMLDataModule:
                 if self.data_config.target_mode == "categorical"
                 else None
             )
+        
+        # if self.data_config.type_of_data == "dataframe":
+        #     # convert string columns to categorical columns
+        #     
 
         # Use handler to prepare datasets
         train, val = self.handler.prepare_data(
@@ -563,6 +566,7 @@ class OpenMLTrainerModule:
         self.add_callbacks()
 
         self.model = copy.deepcopy(model)
+        
         try:
             data, model_classes = self.run_training(task, X_train, y_train, X_test)
 
@@ -572,6 +576,10 @@ class OpenMLTrainerModule:
 
         # In supervised learning this returns the predictions for Y
         pred_y, proba_y = self.run_evaluation(task, data, model_classes)
+
+        # Convert predictions to class labels
+        if task.class_labels is not None:
+            pred_y = [task.class_labels[i] for i in pred_y]
 
         # Convert model to onnx
         onnx_ = self._onnx_export(self.model)
