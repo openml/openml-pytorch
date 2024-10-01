@@ -335,7 +335,6 @@ class OpenMLDataModule:
         X_test: pd.DataFrame,
         task,
     ):
-        model_classes = None
         # Split the training data
         if type(y_train) != pd.Series:
             y_train = pd.Series(y_train)
