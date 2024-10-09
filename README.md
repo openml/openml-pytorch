@@ -29,7 +29,7 @@ Create a pytorch model and get a task from openML
 ```python
 model = torchvision.models.efficientnet_b0(num_classes=200)
 # Download the OpenML task for tiniest imagenet
-task = openml.tasks.get_task(362127)
+task = openml.tasks.get_task(362128)
 ```
 Download the task from openML and define Data and Trainer configuration
 ```python
@@ -50,7 +50,7 @@ data_module = OpenMLDataModule(
     file_dir="datasets",
     filename_col="image_path",
     target_mode="categorical",
-    target_column="Class_encoded",
+    target_column="label",
     batch_size = 64,
     transform=transform
 )
