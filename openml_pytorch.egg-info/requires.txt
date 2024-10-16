@@ -1,0 +1,4 @@
+openml
+torch<2.2.0,>=1.4.0
+onnx
+torchvision

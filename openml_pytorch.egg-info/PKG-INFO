@@ -1,0 +1,70 @@
+Metadata-Version: 2.1
+Name: openml-pytorch
+Version: 0.0.6
+Summary: Pytorch extension for Openml python API
+Home-page: http://openml.org/
+Author:  
+Author-email: 
+Maintainer: Taniya Das
+Maintainer-email: t.das@tue.nl
+License: BSD 3-clause
+Project-URL: Documentation, https://openml.github.io/openml-pytorch/
+Project-URL: Source Code, https://github.com/openml/openml-pytorch
+Classifier: Intended Audience :: Science/Research
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development
+Classifier: Topic :: Scientific/Engineering
+Classifier: Operating System :: POSIX
+Classifier: Operating System :: Unix
+Classifier: Operating System :: MacOS
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Requires-Python: >=3.5, <3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE.md
+
+# Pytorch extension for OpenML python
+
+Pytorch extension for [openml-python API](https://github.com/openml/openml-python).
+
+#### Installation Instructions:
+
+`pip install openml-pytorch`
+
+PyPi link https://pypi.org/project/openml-pytorch/
+
+#### Usage
+Import openML libraries
+```python
+import openml
+import openml_pytorch
+import openml_pytorch.layers
+import openml_pytorch.config
+
+```
+Create a torch model
+```python
+model = torch.nn.Sequential(
+    processing_net,
+    features_net,
+    results_net
+)
+```
+Download the task from openML and run the model on task.
+```python
+task = openml.tasks.get_task(3573)
+run = openml.runs.run_model_on_task(model, task, avoid_duplicate_runs=False)
+run.publish()
+print('URL for run: %s/run/%d' % (openml.config.server, run.run_id))
+```
+Note: The input layer of the network should be compatible with OpenML data output shape. Please check [examples](/examples/) for more information.
+
+Additionally, if you want to publish the run with onnx file, then you must call ```openml_pytorch.add_onnx_to_run()``` immediately before ```run.publish()```. 
+
+```python
+run = openml_pytorch.add_onnx_to_run(run)
+```
