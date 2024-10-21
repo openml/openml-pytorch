@@ -11,7 +11,7 @@ PyPi link https://pypi.org/project/openml-pytorch/
 ## Usage
 To use this extension, you need to have a task from OpenML. You can either browse the [OpenML website](https://openml.org/search?type=task&sort=runs) to find a task (and get it's ID), or follow the [example](./Examples/Create%20Dataset%20and%20Task.ipynb) to create a task from a custom dataset.
 
-Then, follow one of the examples in the [Examples](./Examples) folder to see how to use this extension for your type of data.
+Then, follow one of the examples in the [Examples](./Examples/Create%20Dataset%20and%20Task.ipynb) folder to see how to use this extension for your type of data.
 
 Import openML libraries
 ```python
@@ -71,7 +71,7 @@ run = openml.runs.run_model_on_task(model, task, avoid_duplicate_runs=False)
 run.publish()
 print('URL for run: %s/run/%d' % (openml.config.server, run.run_id))
 ```
-Note: The input layer of the network should be compatible with OpenML data output shape. Please check [examples](/examples/) for more information.
+Note: The input layer of the network should be compatible with OpenML data output shape. Please check [examples](./Examples/Create%20Dataset%20and%20Task.ipynb) for more information.
 
 Additionally, if you want to publish the run with onnx file, then you must call ```openml_pytorch.add_onnx_to_run()``` immediately before ```run.publish()```. 
 

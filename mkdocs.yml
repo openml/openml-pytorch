@@ -52,15 +52,13 @@ plugins:
 
 nav:
   - Home: "index.md"
-  - "API Reference":
-    - API reference/index.md
+  - API Reference:
     - "Callbacks": "API reference/Callbacks.md"
     - "Custom Datasets": "API reference/Custom Datasets.md"
     - "Metrics" : "API reference/Metrics.md"
     - "OpenML Connection" : "API reference/OpenML Connection.md"
     - "Trainer" : "API reference/Trainer.md"
   - Examples:
-    - Examples/index.md
     - "Create Dataset and Task" : "Examples/Create Dataset and Task.ipynb"
     - "Image Classification Task" : "Examples/Image Classification Task.ipynb"
     - "Pretrained Transformer Image Classification Task" : "Examples/Pretrained Transformer Image Classification Task.ipynb"
