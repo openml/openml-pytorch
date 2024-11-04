@@ -1,12 +1,19 @@
 # Pytorch extension for OpenML python
 
-Pytorch extension for [openml-python API](https://github.com/openml/openml-python).
+Pytorch extension for [openml-python API](https://github.com/openml/openml-python). This library provides a simple way to run your Pytorch models on OpenML tasks. 
+
+For a more native experience, PyTorch itself provides OpenML integrations for some tasks. You can find more information [here](<Integrations of OpenML in PyTorch.md>).
 
 #### Installation Instructions:
 
 `pip install openml-pytorch`
 
 PyPi link https://pypi.org/project/openml-pytorch/
+
+Set the API key for OpenML from the command line:
+```bash
+openml configure apikey <your API key>
+```
 
 #### Usage
 Import openML libraries

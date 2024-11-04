@@ -14,6 +14,11 @@ PyPi link https://pypi.org/project/openml-pytorch/
 ## Usage
 To use this extension, you need to have a task from OpenML. You can either browse the [OpenML website](https://openml.org/search?type=task&sort=runs) to find a task (and get it's ID), or follow the [example](./Examples/Create%20Dataset%20and%20Task.ipynb) to create a task from a custom dataset.
 
+Set the API key for OpenML from the command line:
+```bash
+openml configure apikey <your API key>
+```
+
 Then, follow one of the examples in the [Examples](./Examples/Create%20Dataset%20and%20Task.ipynb) folder to see how to use this extension for your type of data.
 
 Import openML libraries
