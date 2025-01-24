@@ -1,52 +1,48 @@
 """
 This module defines the Pytorch extension for OpenML-python.
 """
-from collections import OrderedDict  # noqa: F401
 import copy
-from distutils.version import LooseVersion
 import importlib
 import inspect
+import io
 import json
 import logging
+import os
 import re
 import sys
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import warnings
+from collections import OrderedDict  # noqa: F401
+from distutils.version import LooseVersion
+from types import SimpleNamespace
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
+import onnx
+import openml
 import pandas as pd
-
 import scipy.sparse
 import scipy.special
-from . import config
-from openml_pytorch.trainer import OpenMLTrainerModule
-
 import torch
+import torch.autograd
+import torch.cuda
 import torch.nn
 import torch.optim
 import torch.utils.data
-import torch.autograd
-import torch.cuda
-
-import openml
 from openml.exceptions import PyOpenMLError
 from openml.extensions import Extension, register_extension
 from openml.flows import OpenMLFlow
 from openml.runs.trace import OpenMLRunTrace, OpenMLTraceIteration
 from openml.tasks import (
-    OpenMLTask,
-    OpenMLSupervisedTask,
     OpenMLClassificationTask,
     OpenMLRegressionTask,
+    OpenMLSupervisedTask,
+    OpenMLTask,
 )
-from types import SimpleNamespace
-import os 
-
-
 from sklearn import preprocessing
 
-import io
-import onnx
+from openml_pytorch.trainer import OpenMLTrainerModule
+
+from . import config
 
 if sys.version_info >= (3, 5):
     from json.decoder import JSONDecodeError
@@ -336,8 +332,8 @@ class PytorchExtension(Extension):
 
         # This can possibly be done by a package such as pyxb, but I could not get
         # it to work properly.
-        import scipy
         import numpy
+        import scipy
 
         major, minor, micro, _, _ = sys.version_info
         python_version = 'Python_{}.'.format(
@@ -393,8 +389,8 @@ class PytorchExtension(Extension):
         # is not supported by OpenML
         self._check_multiple_occurence_of_component_in_flow(model, subcomponents)
 
-        import zlib
         import os
+        import zlib
 
         # class_name = model.__module__ + "." + model.__class__.__name__
         class_name = 'torch.nn' + "." + model.__class__.__name__

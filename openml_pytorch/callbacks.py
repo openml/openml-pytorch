@@ -2,10 +2,34 @@
 Callbacks module contains classes and functions for handling callback functions during an event-driven process. This makes it easier to customize the behavior of the training loop and add additional functionality to the training process without modifying the core code.
 
 To use a callback, create a class that inherits from the Callback class and implement the necessary methods. Callbacks can be used to perform actions at different stages of the training process, such as at the beginning or end of an epoch, batch, or fitting process. Then pass the callback object to the Trainer.
+
+## How to Use:
+```python
+trainer = OpenMLTrainerModule(
+    data_module=data_module,
+    verbose = True,
+    epoch_count = 1,
+    callbacks=[ <insert your callback class name here> ],
+)
+```
+
+To add a custom parameter, for example to add a different metric to the AvgStatsCallBack.
+```python
+trainer = OpenMLTrainerModule(
+    data_module=data_module,
+    verbose = True,
+    epoch_count = 1,
+    callbacks=[ AvgStatsCallBack([accuracy]) ],
+)
+
+## Useful Callbacks:
+- TestCallback: Use when you are testing out new code and want to iterate through the training loop quickly. Stops training after 2 iterations.
 """
 
+from datetime import datetime
 from functools import partial
 import math
+from pathlib import Path
 import re
 from typing import Iterable
 
@@ -13,12 +37,14 @@ from matplotlib import pyplot as plt
 import numpy as np
 import torch
 
+from torch.utils.tensorboard import SummaryWriter
+
 _camel_re1 = re.compile("(.)([A-Z][a-z]+)")
 _camel_re2 = re.compile("([a-z0-9])([A-Z])")
 torch.Tensor.ndim = property(lambda x: len(x.shape))
 
 
-def listify(o = None) -> list:
+def listify(o=None) -> list:
     """
     Convert `o` to list. If `o` is None, return empty list.
     """
@@ -38,6 +64,7 @@ def annealer(f) -> callable:
     A decorator function for creating a partially applied function with predefined start and end arguments.
     The inner function `_inner` captures the `start` and `end` parameters and returns a `partial` object that fixes these parameters for the decorated function `f`.
     """
+
     def _inner(start, end):
         return partial(f, start, end)
 
@@ -93,7 +120,7 @@ def combine_scheds(pcts: Iterable[float], scheds: Iterable[callable]) -> callabl
     return _inner
 
 
-def camel2snake(name : str) -> str:
+def camel2snake(name: str) -> str:
     """
     Convert `name` from camel case to snake case.
     """
@@ -104,14 +131,15 @@ def camel2snake(name : str) -> str:
 class Callback:
     """
 
-        Callback class is a base class designed for handling different callback functions during
-        an event-driven process. It provides functionality to set a runner, retrieve the class
-        name in snake_case format, directly call callback methods, and delegate attribute access
-        to the runner if the attribute does not exist in the Callback class.
+    Callback class is a base class designed for handling different callback functions during
+    an event-driven process. It provides functionality to set a runner, retrieve the class
+    name in snake_case format, directly call callback methods, and delegate attribute access
+    to the runner if the attribute does not exist in the Callback class.
 
-        The _order is used to decide the order of Callbacks.
+    The _order is used to decide the order of Callbacks.
 
     """
+
     _order = 0
 
     def set_runner(self, run) -> None:
@@ -136,6 +164,7 @@ class ParamScheduler(Callback):
     """
     Manages scheduling of parameter adjustments over the course of training.
     """
+
     _order = 1
 
     def __init__(self, pname, sched_funcs):
@@ -165,10 +194,12 @@ class ParamScheduler(Callback):
         if self.in_train:
             self.set_param()
 
+
 class Recorder(Callback):
     """
-        Recorder is a callback class used to record learning rates and losses during the training process.
+    Recorder is a callback class used to record learning rates and losses during the training process.
     """
+
     def begin_fit(self):
         """
         Initializes attributes necessary for the fitting process.
@@ -186,7 +217,7 @@ class Recorder(Callback):
         """
         Handles operations to execute after each training batch.
 
-        Modifies the learning rate for each parameter group in the optimizer 
+        Modifies the learning rate for each parameter group in the optimizer
         and appends the current learning rate and loss to the corresponding lists.
 
         """
@@ -201,6 +232,7 @@ class Recorder(Callback):
         Plots the learning rate for a given parameter group.
         """
         plt.plot(self.lrs[pgid])
+        return self.lrs[pgid]
 
     def plot_loss(self, skip_last=0):
         """
@@ -217,32 +249,34 @@ class Recorder(Callback):
         n = len(losses) - skip_last
         plt.xscale("log")
         plt.plot(lrs[:n], losses[:n])
+        return losses, lrs
 
 
 class TrainEvalCallback(Callback):
     """
-        TrainEvalCallback class is a custom callback used during the training
-        and validation phases of a machine learning model to perform specific
-        actions at the beginning and after certain events.
+    TrainEvalCallback class is a custom callback used during the training
+    and validation phases of a machine learning model to perform specific
+    actions at the beginning and after certain events.
 
-        Methods:
+    Methods:
 
-        begin_fit():
-            Initialize the number of epochs and iteration counts at the start
-            of the fitting process.
+    begin_fit():
+        Initialize the number of epochs and iteration counts at the start
+        of the fitting process.
 
-        after_batch():
-            Update the epoch and iteration counts after each batch during
-            training.
+    after_batch():
+        Update the epoch and iteration counts after each batch during
+        training.
 
-        begin_epoch():
-            Set the current epoch, switch the model to training mode, and
-            indicate that the model is in training.
+    begin_epoch():
+        Set the current epoch, switch the model to training mode, and
+        indicate that the model is in training.
 
-        begin_validate():
-            Switch the model to evaluation mode and indicate that the model
-            is in validation.
+    begin_validate():
+        Switch the model to evaluation mode and indicate that the model
+        is in validation.
     """
+
     def begin_fit(self):
         self.run.n_epochs = 0
         self.run.n_iter = 0
@@ -302,6 +336,7 @@ class AvgStats:
         __repr__():
             Returns a string representation of the average statistics.
     """
+
     def __init__(self, metrics, in_train):
         self.metrics, self.in_train = listify(metrics), in_train
 
@@ -343,6 +378,7 @@ class AvgStatsCallBack(Callback):
         after_loss: Accumulates the metrics after computing the loss, differentiating between training and validation phases.
         after_epoch: Prints the accumulated statistics for both training and validation phases after each epoch.
     """
+
     def __init__(self, metrics):
         self.train_stats, self.valid_stats = AvgStats(metrics, True), AvgStats(
             metrics, False
@@ -360,4 +396,45 @@ class AvgStatsCallBack(Callback):
     def after_epoch(self):
         print(self.train_stats)
         print(self.valid_stats)
-    
+
+
+class TestCallback(Callback):
+    """
+    TestCallback class is a custom callback used to test the training loop by stopping the training process after 2 iterations. Useful for debugging and testing purposes, not intended for actual training.
+    """
+
+    def after_step(self):
+        if self.n_iter >= 2:
+            raise CancelTrainException()
+
+
+class TensorBoardCallback(Callback):
+    """
+    Log training metrics to TensorBoard.
+    """
+
+    def __init__(self, writer):
+        self.writer = writer
+
+    def begin_batch(self):
+
+        # if self.saved_graph is False:
+        #     self.saved_graph = True
+        #     self.writer.add_graph(self.model, self.xb)
+        # check if saved_grah object exists
+
+        if "saved_graph" not in self.__dict__ or not self.saved_graph:
+            self.writer.add_graph(self.model, self.xb)
+            self.saved_graph = True
+
+    def after_batch(self):
+        if self.in_train:
+            self.writer.add_scalar("Loss/train", self.loss, self.n_iter)
+        else:
+            self.writer.add_scalar("Loss/valid", self.loss, self.n_iter)
+
+    def after_epoch(self):
+        self.writer.add_scalar("Loss/valid", self.loss, self.epoch)
+
+    def after_fit(self):
+        self.writer.close()
