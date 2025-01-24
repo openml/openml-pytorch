@@ -26,17 +26,16 @@ trainer = OpenMLTrainerModule(
 - TestCallback: Use when you are testing out new code and want to iterate through the training loop quickly. Stops training after 2 iterations.
 """
 
+import math
+import re
 from datetime import datetime
 from functools import partial
-import math
 from pathlib import Path
-import re
 from typing import Iterable
 
-from matplotlib import pyplot as plt
 import numpy as np
 import torch
-
+from matplotlib import pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 
 _camel_re1 = re.compile("(.)([A-Z][a-z]+)")
@@ -231,14 +230,15 @@ class Recorder(Callback):
         """
         Plots the learning rate for a given parameter group.
         """
-        plt.plot(self.lrs[pgid])
-        return self.lrs[pgid]
+        plot = plt.plot(self.lrs[pgid])
+        # self.writer.add_image("Learning rate", plot, 0)
+        return plot
 
     def plot_loss(self, skip_last=0):
         """
         Plots the loss for a given parameter group.
         """
-        plt.plot(self.losses[: len(self.losses) - skip_last])
+        return plt.plot(self.losses[: len(self.losses) - skip_last])
 
     def plot(self, skip_last=0, pgid=-1):
         """
@@ -248,8 +248,8 @@ class Recorder(Callback):
         lrs = self.lrs[pgid]
         n = len(losses) - skip_last
         plt.xscale("log")
-        plt.plot(lrs[:n], losses[:n])
-        return losses, lrs
+        return plt.plot(lrs[:n], losses[:n])
+        # return losses, lrs
 
 
 class TrainEvalCallback(Callback):
@@ -365,7 +365,30 @@ class AvgStats:
         return f"{'train' if self.in_train else 'valid'}: {self.avg_stats}"
 
 
-class AvgStatsCallBack(Callback):
+class PutDataOnDeviceCallback(Callback):
+    """
+    PutDataOnDevice class is a custom callback used to move the input data and target labels to the device (CPU or GPU) before passing them to the model.
+
+    Methods:
+        begin_fit: Moves the model to the device at the beginning of the fitting process.
+        begin_batch: Moves the input data and target labels to the device at the beginning of each batch.
+    """
+
+    def __init__(self, device):
+        self.device = device
+
+    def begin_fit(self):
+        self.model.to(self.device)
+
+    def begin_batch(self):
+        self.run.xb, self.run.yb = self.xb.to(self.device), self.yb.to(self.device)
+
+    def after_pred(self):
+        self.run.pred = self.run.pred.to(self.device)
+        self.run.yb = self.run.yb.to(self.device)
+
+
+class AvgStatsCallback(Callback):
     """
     AvgStatsCallBack class is a custom callback used to track and print average statistics for training and validation phases during the training loop.
 
@@ -410,31 +433,27 @@ class TestCallback(Callback):
 
 class TensorBoardCallback(Callback):
     """
-    Log training metrics to TensorBoard.
+    Log specific things to TensorBoard.
+    - Model
     """
 
     def __init__(self, writer):
         self.writer = writer
 
     def begin_batch(self):
-
-        # if self.saved_graph is False:
-        #     self.saved_graph = True
-        #     self.writer.add_graph(self.model, self.xb)
-        # check if saved_grah object exists
-
         if "saved_graph" not in self.__dict__ or not self.saved_graph:
             self.writer.add_graph(self.model, self.xb)
             self.saved_graph = True
 
-    def after_batch(self):
-        if self.in_train:
-            self.writer.add_scalar("Loss/train", self.loss, self.n_iter)
-        else:
-            self.writer.add_scalar("Loss/valid", self.loss, self.n_iter)
-
-    def after_epoch(self):
-        self.writer.add_scalar("Loss/valid", self.loss, self.epoch)
-
     def after_fit(self):
+        # check if tensorboard writer is available
+        try:
+
+            # add loss and learning rate  to tensorboard
+            self.writer.add_scalar("Loss", self.run.loss, self.n_iter)
+            self.writer.add_scalar(
+                "Learning rate", self.run.opt.param_groups[0]["lr"], self.n_iter
+            )
+        except Exception as e:
+            print(f"Error: {e}")
         self.writer.close()

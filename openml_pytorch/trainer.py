@@ -7,42 +7,36 @@ This module provides classes and methods to facilitate the configuration, data h
 - Managing data transformations and loaders.
 """
 
+import copy
 import gc
+import io
 import logging
-import re
-from types import SimpleNamespace
 import warnings
-import numpy as np
-import torch
-from typing import Any, Iterable, List, Optional, Tuple, Union
 from collections import OrderedDict
+from functools import partial
+from types import SimpleNamespace
+from typing import Any, List, Optional
+
+import netron
+import numpy as np
+import onnx
+import pandas as pd
+import torch
+import torch.amp
+import torch.utils
+from openml.exceptions import PyOpenMLError
+from openml.tasks import (OpenMLClassificationTask, OpenMLRegressionTask,
+                          OpenMLSupervisedTask, OpenMLTask)
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
-from openml.tasks import (
-    OpenMLTask,
-    OpenMLSupervisedTask,
-    OpenMLClassificationTask,
-    OpenMLRegressionTask,
-)
-import torch.amp
-import pandas as pd
-import copy
-import io
-import onnx
-import torch.utils
+from torch.utils.data import DataLoader
+from torchvision.transforms import (Compose, Lambda, Resize, ToPILImage,
+                                    ToTensor)
 from tqdm import tqdm
-from .custom_datasets import OpenMLImageDataset, OpenMLTabularDataset
-from openml.exceptions import PyOpenMLError
-from types import SimpleNamespace
-import matplotlib.pyplot as plt
-from functools import partial
-import math
+
 from .callbacks import *
-from .metrics import accuracy, accuracy_topk
-from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
-from abc import ABC, abstractmethod
-import netron
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from .custom_datasets import OpenMLImageDataset, OpenMLTabularDataset
+from .metrics import accuracy
 
 
 def convert_to_rgb(image):
@@ -214,10 +208,12 @@ class BaseDataHandler:
     BaseDataHandler class is an abstract base class for data handling operations.
     """
 
-    def prepare_data(self, X_train, y_train, X_val, y_val, data_config=None):
+    def prepare_data(
+        self, X_train, y_train, X_val, y_val, data_config: SimpleNamespace
+    ):
         raise NotImplementedError
 
-    def prepare_test_data(self, X_test, data_config=None):
+    def prepare_test_data(self, X_test, data_config: SimpleNamespace):
         raise NotImplementedError
 
 
@@ -288,7 +284,7 @@ class DataContainer:
         test_dl: Optional DataLoader object for the test data.
     """
 
-    def __init__(self, train_dl, valid_dl, test_dl=None):
+    def __init__(self, train_dl: DataLoader, valid_dl: torch.utils.data.DataLoader, test_dl: torch.utils.data.DataLoader = None):  # type: ignore
         self.train_dl, self.valid_dl = train_dl, valid_dl
         self.test_dl = test_dl
 
@@ -323,7 +319,7 @@ class OpenMLDataModule:
         self.data_config.file_dir = file_dir
         self.data_config.target_mode = target_mode
         self.data_config.target_column = target_column
-        self.handler = data_handlers.get(type_of_data)
+        self.handler: BaseDataHandler | None = data_handlers.get(type_of_data)
 
         if transform is not None:
             self.data_config.transform = transform
@@ -368,21 +364,26 @@ class OpenMLDataModule:
         #
 
         # Use handler to prepare datasets
+        if self.handler is None:
+            raise ValueError(
+                f"Data type {self.data_config.type_of_data} not supported."
+            )
+
         train, val = self.handler.prepare_data(
             X_train_train, y_train_train, X_val, y_val, self.data_config
         )
 
         # Create DataLoaders
-        train_loader = torch.utils.data.DataLoader(
+        train_loader = DataLoader(
             train, batch_size=self.data_config.batch_size, shuffle=True
         )
-        val_loader = torch.utils.data.DataLoader(
+        val_loader = DataLoader(
             val, batch_size=self.data_config.batch_size, shuffle=False
         )
 
         # Prepare test data
         test = self.handler.prepare_test_data(X_test, self.data_config)
-        test_loader = torch.utils.data.DataLoader(
+        test_loader = DataLoader(
             test, batch_size=self.data_config.batch_size, shuffle=False
         )
 
@@ -391,6 +392,7 @@ class OpenMLDataModule:
 
 class ModelRunner:
     def __init__(self, cbs=None, cb_funcs=None):
+
         cbs = listify(cbs)
         for cbf in listify(cb_funcs):
             cb = cbf()
@@ -425,12 +427,11 @@ class ModelRunner:
     def one_batch(self, xb, yb):
         try:
             self.xb, self.yb = xb, yb
-            self.xb = self.xb.to(self.learn.device)
-            self.yb = self.yb.to(self.learn.device)
+
+            self("begin_batch")
             # Below two lines are hack to convert model to onnx
             global sample_input
             sample_input = self.xb
-            self("begin_batch")
             self.pred = self.model(self.xb)
             self("after_pred")
             self.loss = self.criterion(self.pred, self.yb)
@@ -487,14 +488,15 @@ class Learner:
     A class to store the model, optimizer, criterion, and data loaders for training and evaluation.
     """
 
-    def __init__(self, model, opt, criterion, data, model_classes):
+    def __init__(self, model, opt, criterion, data, model_classes, device="cpu"):
         (
             self.model,
             self.opt,
             self.criterion,
             self.data,
             self.model_classes,
-        ) = (model, opt, criterion, data, model_classes)
+            self.device,
+        ) = (model, opt, criterion, data, model_classes, device)
 
 
 class OpenMLTrainerModule:
@@ -514,10 +516,13 @@ class OpenMLTrainerModule:
 
     def __init__(
         self,
+        experiment_name: str,
         data_module: OpenMLDataModule,
         callbacks: List[Callback] = [],
+        use_tensorboard: bool = True,
         **kwargs,
     ):
+        self.experiment_name = experiment_name
         self.config_gen = DefaultConfigGenerator()
         self.model_config = self.config_gen.return_model_config()
         self.data_module = data_module
@@ -532,6 +537,16 @@ class OpenMLTrainerModule:
         self.logger: logging.Logger = logging.getLogger(__name__)
 
         self.user_defined_measures = OrderedDict()
+        # Tensorboard support
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.tensorboard_writer = None
+
+        if use_tensorboard:
+            self.tensorboard_writer = SummaryWriter(
+                comment=experiment_name,
+                log_dir=f"tensorboard_logs/{experiment_name}/{timestamp}",
+            )
+
         # self.callbacks.append(LoggingCallback(self.logger, print_output=False))
         self.loss = 0
         self.training_state = True
@@ -544,9 +559,14 @@ class OpenMLTrainerModule:
         # Add default callbacks
         self.cbfs = [
             Recorder,
-            partial(AvgStatsCallBack, [accuracy]),
+            partial(AvgStatsCallback, accuracy),
             partial(ParamScheduler, "lr", self.scheds),
+            partial(PutDataOnDeviceCallback, self.config.device),
         ]
+        if self.tensorboard_writer is not None:
+            self.cbfs.append(partial(TensorBoardCallback, self.tensorboard_writer))
+
+        self.add_callbacks()
 
     def export_to_onnx(self, model_copy):
         """
@@ -558,7 +578,10 @@ class OpenMLTrainerModule:
         onnx_ = onnx_model.SerializeToString()
         return onnx_
 
-    def export_to_netron(self, onnx_file_name: str = "model.onnx"):
+    def export_to_netron(self, onnx_file_name: str = f"model.onnx"):
+        """
+        Exports the model to ONNX format and serves it using netron.
+        """
         if self.onnx_model is None:
             try:
                 self.onnx_model = self.export_to_onnx(self.model)
@@ -583,15 +606,13 @@ class OpenMLTrainerModule:
         fold_no: int,
         y_train: Optional[pd.Series],
         X_test: pd.DataFrame,
-    ) -> Tuple[np.ndarray, Optional[np.ndarray], OrderedDict, Optional[Any]]:
+    ):
 
         # if task has no class labels, we assign the class labels to be the unique values in the training set
         if task.class_labels is None:
             task.class_labels = y_train.unique()
 
         # Add the user defined callbacks
-
-        self.add_callbacks()
 
         self.model = copy.deepcopy(model)
 
