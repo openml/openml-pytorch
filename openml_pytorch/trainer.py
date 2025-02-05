@@ -572,10 +572,13 @@ class OpenMLTrainerModule:
         """
         Converts the model to ONNX format. Uses a hack for now (global variable) to get the sample input.
         """
+        global sample_input
         f = io.BytesIO()
         torch.onnx.export(model_copy, sample_input, f)
         onnx_model = onnx.load_model_from_string(f.getvalue())
         onnx_ = onnx_model.SerializeToString()
+        global last_models
+        last_models = onnx_
         return onnx_
 
     def export_to_netron(self, onnx_file_name: str = f"model.onnx"):
@@ -635,7 +638,7 @@ class OpenMLTrainerModule:
 
         # Hack to store the last model for ONNX conversion
         global last_models
-        last_models = onnx_
+        # last_models = onnx_
         self.onnx_model = onnx_
 
         return pred_y, proba_y, self.user_defined_measures, None

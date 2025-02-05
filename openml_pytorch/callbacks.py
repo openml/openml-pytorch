@@ -403,8 +403,9 @@ class AvgStatsCallback(Callback):
     """
 
     def __init__(self, metrics):
-        self.train_stats, self.valid_stats = AvgStats(metrics, True), AvgStats(
-            metrics, False
+        self.train_stats, self.valid_stats = (
+            AvgStats(metrics, True),
+            AvgStats(metrics, False),
         )
 
     def begin_epoch(self):
@@ -427,7 +428,7 @@ class TestCallback(Callback):
     """
 
     def after_step(self):
-        if self.n_iter >= 2:
+        if self.n_iter >= 1:
             raise CancelTrainException()
 
 
@@ -448,7 +449,6 @@ class TensorBoardCallback(Callback):
     def after_fit(self):
         # check if tensorboard writer is available
         try:
-
             # add loss and learning rate  to tensorboard
             self.writer.add_scalar("Loss", self.run.loss, self.n_iter)
             self.writer.add_scalar(
