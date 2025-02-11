@@ -7,6 +7,7 @@ from . import config, custom_datasets, layers, trainer, extension
 from .callbacks import *
 from .extension import PytorchExtension
 from .metrics import accuracy, accuracy_topk
+from pathlib import Path
 from .trainer import (
     BaseDataHandler,
     DataContainer,

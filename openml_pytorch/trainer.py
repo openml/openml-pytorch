@@ -8,6 +8,7 @@ This module provides classes and methods to facilitate the configuration, data h
 """
 
 import copy
+from datetime import datetime
 import gc
 import io
 import logging
@@ -36,7 +37,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Lambda, Resize, ToPILImage, ToTensor
 from tqdm import tqdm
-
+from torch.utils.tensorboard.writer import SummaryWriter
 from .callbacks import *
 from .custom_datasets import OpenMLImageDataset, OpenMLTabularDataset
 from .metrics import accuracy
