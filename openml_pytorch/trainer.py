@@ -25,13 +25,16 @@ import torch
 import torch.amp
 import torch.utils
 from openml.exceptions import PyOpenMLError
-from openml.tasks import (OpenMLClassificationTask, OpenMLRegressionTask,
-                          OpenMLSupervisedTask, OpenMLTask)
+from openml.tasks import (
+    OpenMLClassificationTask,
+    OpenMLRegressionTask,
+    OpenMLSupervisedTask,
+    OpenMLTask,
+)
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
-from torchvision.transforms import (Compose, Lambda, Resize, ToPILImage,
-                                    ToTensor)
+from torchvision.transforms import Compose, Lambda, Resize, ToPILImage, ToTensor
 from tqdm import tqdm
 
 from .callbacks import *
@@ -190,9 +193,7 @@ class DefaultConfigGenerator:
             # sanitize sanitizes the input data in order to ensure that models can be trained safely
             sanitize=self._default_sanitize,  # type: Callable[[torch.Tensor], torch.Tensor]
             # retype_labels changes the types of the labels in order to ensure type compatibility
-            retype_labels=(
-                self._default_retype_labels
-            ),  # type: Callable[[torch.Tensor, OpenMLTask], torch.Tensor]
+            retype_labels=(self._default_retype_labels),  # type: Callable[[torch.Tensor, OpenMLTask], torch.Tensor]
             # image_size is the size of the images that are fed into the model
             image_size=128,
             # batch_size represents the processing batch size for training
@@ -284,7 +285,12 @@ class DataContainer:
         test_dl: Optional DataLoader object for the test data.
     """
 
-    def __init__(self, train_dl: DataLoader, valid_dl: torch.utils.data.DataLoader, test_dl: torch.utils.data.DataLoader = None):  # type: ignore
+    def __init__(
+        self,
+        train_dl: DataLoader,
+        valid_dl: torch.utils.data.DataLoader,
+        test_dl: torch.utils.data.DataLoader = None,
+    ):  # type: ignore
         self.train_dl, self.valid_dl = train_dl, valid_dl
         self.test_dl = test_dl
 
@@ -335,6 +341,63 @@ class OpenMLDataModule:
         task,
     ):
         # Split the training data
+        X_train_train, X_val, y_train_train, y_val = self.split_training_data(X_train, y_train)
+
+        y_train_train, y_val, model_classes = self.encode_labels(y_train_train, y_val)
+
+        # Use handler to prepare datasets
+        train_loader, val_loader = self.prepare_datasets_for_training_and_validation(X_train_train, X_val, y_train_train, y_val)
+
+        # Prepare test data
+        test_loader = self.process_test_data(X_test)
+
+        return DataContainer(train_loader, val_loader, test_loader), model_classes
+
+    def process_test_data(self, X_test):
+        test = self.handler.prepare_test_data(X_test, self.data_config)
+        test_loader = DataLoader(
+            test, batch_size=self.data_config.batch_size, shuffle=False
+        )
+        
+        return test_loader
+
+    def prepare_datasets_for_training_and_validation(self, X_train_train, X_val, y_train_train, y_val):
+        if self.handler is None:
+            raise ValueError(
+                f"Data type {self.data_config.type_of_data} not supported."
+            )
+
+        train, val = self.handler.prepare_data(
+            X_train_train, y_train_train, X_val, y_val, self.data_config
+        )
+
+        train_loader = DataLoader(
+            train, batch_size=self.data_config.batch_size, shuffle=True
+        )
+        val_loader = DataLoader(
+            val, batch_size=self.data_config.batch_size, shuffle=False
+        )
+        
+        return train_loader,val_loader
+
+    def encode_labels(self, y_train_train, y_val):
+        """
+        Encode the labels for categorical data
+        """
+        if self.data_config.target_mode == "categorical":
+            label_encoder = preprocessing.LabelEncoder().fit(y_train_train)
+            y_train_train = pd.Series(label_encoder.transform(y_train_train))
+            y_val = pd.Series(label_encoder.transform(y_val))
+            # Determine model classes
+            model_classes = (
+                label_encoder.classes_
+                if self.data_config.target_mode == "categorical"
+                else None
+            )
+            
+        return y_train_train,y_val,model_classes
+
+    def split_training_data(self, X_train, y_train):
         if type(y_train) != pd.Series:
             y_train = pd.Series(y_train)
 
@@ -346,53 +409,12 @@ class OpenMLDataModule:
             stratify=y_train,
             random_state=0,
         )
-
-        # Encode the labels for categorical data
-        if self.data_config.target_mode == "categorical":
-            label_encoder = preprocessing.LabelEncoder().fit(y_train_train)
-            y_train_train = pd.Series(label_encoder.transform(y_train_train))
-            y_val = pd.Series(label_encoder.transform(y_val))
-            # Determine model classes
-            model_classes = (
-                label_encoder.classes_
-                if self.data_config.target_mode == "categorical"
-                else None
-            )
-
-        # if self.data_config.type_of_data == "dataframe":
-        #     # convert string columns to categorical columns
-        #
-
-        # Use handler to prepare datasets
-        if self.handler is None:
-            raise ValueError(
-                f"Data type {self.data_config.type_of_data} not supported."
-            )
-
-        train, val = self.handler.prepare_data(
-            X_train_train, y_train_train, X_val, y_val, self.data_config
-        )
-
-        # Create DataLoaders
-        train_loader = DataLoader(
-            train, batch_size=self.data_config.batch_size, shuffle=True
-        )
-        val_loader = DataLoader(
-            val, batch_size=self.data_config.batch_size, shuffle=False
-        )
-
-        # Prepare test data
-        test = self.handler.prepare_test_data(X_test, self.data_config)
-        test_loader = DataLoader(
-            test, batch_size=self.data_config.batch_size, shuffle=False
-        )
-
-        return DataContainer(train_loader, val_loader, test_loader), model_classes
+        
+        return X_train_train,X_val,y_train_train,y_val
 
 
 class ModelRunner:
     def __init__(self, cbs=None, cb_funcs=None):
-
         cbs = listify(cbs)
         for cbf in listify(cb_funcs):
             cb = cbf()
@@ -500,7 +522,6 @@ class Learner:
 
 
 class OpenMLTrainerModule:
-
     def _default_progress_callback(
         self, fold: int, rep: int, epoch: int, step: int, loss: float, accuracy: float
     ):
@@ -610,7 +631,6 @@ class OpenMLTrainerModule:
         y_train: Optional[pd.Series],
         X_test: pd.DataFrame,
     ):
-
         # if task has no class labels, we assign the class labels to be the unique values in the training set
         if task.class_labels is None:
             task.class_labels = y_train.unique()
@@ -668,7 +688,7 @@ class OpenMLTrainerModule:
         # prediction index id
         if not isinstance(classes, list):
             raise ValueError(
-                "please convert model classes to list prior to " "calling this fn"
+                "please convert model classes to list prior to calling this fn"
             )
         result = np.zeros((len(y), len(classes)), dtype=np.float32)
         for obs, prediction_idx in enumerate(y):
@@ -769,6 +789,8 @@ class OpenMLTrainerModule:
             self.learn.model.train()
             self.runner.fit(epochs=self.config.epoch_count, learn=self.learn)
             self.learn.model.eval()
+
+            self.lrs = self.runner.cbs[1].lrs
 
             print("Loss", self.runner.loss)
         else:

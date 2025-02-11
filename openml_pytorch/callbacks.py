@@ -115,7 +115,7 @@ def combine_scheds(pcts: Iterable[float], scheds: Iterable[callable]) -> callabl
         idx = (pos >= pcts).nonzero().max()
         actual_pos = (pos - pcts[idx]) / (pcts[idx + 1] - pcts[idx])
         return scheds[idx](actual_pos)
-
+    
     return _inner
 
 

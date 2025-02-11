@@ -44,6 +44,7 @@ var/
 wheels/
 share/python-wheels/
 *.egg-info/
+openml_pytorch.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
