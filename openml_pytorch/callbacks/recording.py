@@ -62,88 +62,70 @@ class Recorder(Callback):
 
 class AvgStats:
     """
-    AvgStats class is used to track and accumulate average statistics (like loss and other metrics) during training and validation phases.
+    AvgStats is a helper class that tracks and averages metrics over an epoch.
 
-    Attributes:
-        metrics (list): A list of metric functions to be tracked.
-        in_train (bool): A flag to indicate if the statistics are for the training phase.
-
-    Methods:
-        __init__(metrics, in_train):
-            Initializes the AvgStats with metrics and in_train flag.
-
-        reset():
-            Resets the accumulated statistics.
-
-        all_stats:
-            Property that returns all accumulated statistics including loss and metrics.
-
-        avg_stats:
-            Property that returns the average of the accumulated statistics.
-
-        accumulate(run):
-            Accumulates the statistics using the data from the given run.
-
-        __repr__():
-            Returns a string representation of the average statistics.
+    Arguments:
+        metrics: A list of metric functions.
+        in_train: A boolean indicating whether it's tracking training or validation.
     """
-
     def __init__(self, metrics, in_train):
-        self.metrics, self.in_train = listify(metrics), in_train
+        self.metrics = metrics
+        self.in_train = in_train
+        self.reset()
 
     def reset(self):
-        self.tot_loss, self.count = 0.0, 0
-        self.tot_mets = [0.0] * len(self.metrics)
-
-    @property
-    def all_stats(self):
-        return [self.tot_loss.item()] + self.tot_mets
-
-    @property
-    def avg_stats(self):
-        return [o / self.count for o in self.all_stats]
+        """Resets stored metric values."""
+        self.losses = []
+        self.metrics_sums = [0] * len(self.metrics)
+        self.count = 0
 
     def accumulate(self, run):
-        bn = run.xb.shape[0]
-        self.tot_loss += run.loss * bn
-        self.count += bn
-        for i, m in enumerate(self.metrics):
-            self.tot_mets[i] += m(run.pred, run.yb) * bn
+        """Accumulates loss and metric values from the current batch."""
+        bs = run.xb.shape[0]  # Batch size
+        self.losses.append(run.loss.item() * bs)
+        self.count += bs
 
-    def __repr__(self):
-        if not self.count:
-            return ""
-        return f"{'train' if self.in_train else 'valid'}: {self.avg_stats}"
+        for i, metric in enumerate(self.metrics):
+            self.metrics_sums[i] += metric(run.pred, run.yb) * bs
+
+    def __str__(self):
+        """Returns formatted string of average loss and metrics."""
+        avg_loss = sum(self.losses) / self.count if self.count > 0 else 0
+        avg_metrics = [
+            metric_sum / self.count if self.count > 0 else 0
+            for metric_sum in self.metrics_sums
+        ]
+        metric_str = " ".join(
+            [f"{metric.__name__}: {val:.4f}" for metric, val in zip(self.metrics, avg_metrics)]
+        )
+        return f"{'Train' if self.in_train else 'Valid'} - Loss: {avg_loss:.4f} {metric_str}"
+
+
 
 class AvgStatsCallback(Callback):
     """
-    AvgStatsCallBack class is a custom callback used to track and print average statistics for training and validation phases during the training loop.
+    Callback to track and print average loss and metrics for training and validation.
 
     Arguments:
         metrics: A list of metric functions to evaluate during training and validation.
-
-    Methods:
-        __init__: Initializes the callback with given metrics and sets up AvgStats objects for both training and validation phases.
-        begin_epoch: Resets the statistics at the beginning of each epoch.
-        after_loss: Accumulates the metrics after computing the loss, differentiating between training and validation phases.
-        after_epoch: Prints the accumulated statistics for both training and validation phases after each epoch.
     """
 
     def __init__(self, metrics):
-        self.train_stats, self.valid_stats = (
-            AvgStats(metrics, True),
-            AvgStats(metrics, False),
-        )
+        self.train_stats = AvgStats(metrics, True)
+        self.valid_stats = AvgStats(metrics, False)
 
     def begin_epoch(self):
+        """Resets stats at the beginning of each epoch."""
         self.train_stats.reset()
         self.valid_stats.reset()
 
     def after_loss(self):
-        stats = self.train_stats if self.in_train else self.valid_stats
+        """Accumulates metrics after loss calculation."""
+        stats = self.train_stats if self.run.in_train else self.valid_stats
         with torch.no_grad():
             stats.accumulate(self.run)
 
     def after_epoch(self):
+        """Prints training and validation statistics at the end of each epoch."""
         print(self.train_stats)
         print(self.valid_stats)

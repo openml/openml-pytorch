@@ -37,7 +37,7 @@ from openml.tasks import (OpenMLClassificationTask, OpenMLRegressionTask,
                           OpenMLSupervisedTask, OpenMLTask)
 from sklearn import preprocessing
 
-from openml_pytorch.trainer import OpenMLTrainerModule
+from openml_pytorch.trainer import Trainer
 
 from . import config
 
@@ -1111,14 +1111,23 @@ class PytorchExtension(Extension):
         """
 
         try:
-            trainer: OpenMLTrainerModule = config.trainer
+            trainer = config.trainer
             trainer.logger = config.logger
         except AttributeError:
             raise ValueError(
                 "Trainer not set to config. Please use openml_pytorch.config.trainer = trainer to set the trainer."
             )
+        # return trainer.run_model_on_fold(
+            # model, task, X_train, rep_no, fold_no, y_train, X_test
+        # )
         return trainer.run_model_on_fold(
-            model, task, X_train, rep_no, fold_no, y_train, X_test
+            model = model,
+            task = task,
+            X_train = X_train,
+            rep_no = rep_no,
+            fold_no = fold_no,
+            y_train = y_train,
+            X_test = X_test, 
         )
 
     def compile_additional_information(

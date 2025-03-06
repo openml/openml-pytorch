@@ -9,15 +9,10 @@ from .extension import PytorchExtension
 from .metrics import accuracy, accuracy_topk
 from pathlib import Path
 from .trainer import (
-    BaseDataHandler,
     DataContainer,
-    DefaultConfigGenerator,
-    Learner,
-    OpenMLDataModule,
-    OpenMLImageHandler,
-    OpenMLTabularHandler,
-    OpenMLTrainerModule,
     convert_to_rgb,
+    Trainer,
+    DataModule
 )
 
 __all__ = [
@@ -25,20 +20,14 @@ __all__ = [
     "layers",
     "add_experiment_info_to_run",
     "add_file_to_run",
-    "trainer",
+    "Trainer",
     "custom_datasets",
     "config",
     "convert_to_rgb",
-    "DefaultConfigGenerator",
-    "BaseDataHandler",
-    "OpenMLImageHandler",
-    "OpenMLTabularHandler",
     "DataContainer",
-    "OpenMLDataModule",
-    "Learner",
-    "OpenMLTrainerModule",
     "accuracy",
     "accuracy_topk",
+    "DataModule",
 ]
 
 register_extension(PytorchExtension)

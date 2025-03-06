@@ -1,6 +1,6 @@
 
 import os
-
+import torchvision
 import torchvision.transforms as T
 from torch.utils.data import Dataset
 from torchvision.io import read_image
@@ -29,22 +29,18 @@ class OpenMLImageDataset(Dataset):
         self.image_dir = image_dir
         self.transform_x = transform_x
         self.transform_y = transform_y
-
+    
     def __getitem__(self, idx):
-        img_name = str(os.path.join(self.image_dir, self.X.iloc[idx, 0]))
-        image = read_image(img_name)
-        image = image.float()
-        image = T.Resize((self.image_size, self.image_size))(image)
-        if self.transform_x is not None:
+        image = torchvision.io.read_image(f"{self.image_dir}/{self.X.iloc[idx]}")
+        image = torchvision.transforms.functional.resize(image, [self.image_size, self.image_size])
+        if self.transform_x:
             image = self.transform_x(image)
         if self.y is not None:
-            label = self.y.iloc[idx]
-            if label is not None:
-                if self.transform_y is not None:
-                    label = self.transform_y(label)
-                return image, label
-        else:
-            return image
-
+            label = self.y[idx]
+            if self.transform_y:
+                label = self.transform_y(label)
+            return image, label
+        return image
+    
     def __len__(self):
         return len(self.X)

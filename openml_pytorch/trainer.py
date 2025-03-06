@@ -16,11 +16,12 @@ import warnings
 from collections import OrderedDict
 from functools import partial
 from types import SimpleNamespace
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional, Union
 
 import netron
 import numpy as np
 import onnx
+import openml
 import pandas as pd
 import torch
 import torch.amp
@@ -57,362 +58,410 @@ def convert_to_rgb(image):
         return image.convert("RGB")
     return image
 
-
-class DefaultConfigGenerator:
-    """
-    DefaultConfigGenerator class provides various methods to generate default configurations.
-    """
-
-    @staticmethod
-    def _default_criterion_gen(task: OpenMLTask) -> torch.nn.Module:
-        """
-        _default_criterion_gen returns a criterion based on the task type - regressions use
-        torch.nn.SmoothL1Loss while classifications use torch.nn.CrossEntropyLoss
-        """
-        if isinstance(task, OpenMLRegressionTask):
-            return torch.nn.SmoothL1Loss()
-        elif isinstance(task, OpenMLClassificationTask):
-            return torch.nn.CrossEntropyLoss()
-        else:
-            raise ValueError(task)
-
-    @staticmethod
-    def _default_optimizer_gen(model: torch.nn.Module, _: OpenMLTask):
-        """
-        _default_optimizer_gen returns the torch.optim.Adam optimizer for the given model
-        """
-        return torch.optim.Adam
-
-    @staticmethod
-    def _default_scheduler_gen(optim, _: OpenMLTask) -> Any:
-        """
-        _default_scheduler_gen returns the torch.optim.lr_scheduler.ReduceLROnPlateau scheduler for the given optimizer
-        """
-        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optim)
-
-    @staticmethod
-    def _default_predict(output: torch.Tensor, task: OpenMLTask) -> torch.Tensor:
-        """
-        _default_predict turns the outputs into predictions by returning the argmax of the output tensor for classification tasks, and by flattening the prediction in case of the regression
-        """
-        output_axis = output.dim() - 1
-        if isinstance(task, OpenMLClassificationTask):
-            output = torch.argmax(output, dim=output_axis)
-        elif isinstance(task, OpenMLRegressionTask):
-            output = output.view(-1)
-        else:
-            raise ValueError(task)
-        return output
-
-    @staticmethod
-    def _default_predict_proba(output: torch.Tensor, task: OpenMLTask) -> torch.Tensor:
-        """
-        _default_predict_proba turns the outputs into probabilities using softmax
-        """
-        output_axis = output.dim() - 1
-        output = output.softmax(dim=output_axis)
-        return output
-
-    @staticmethod
-    def _default_sanitize(tensor: torch.Tensor) -> torch.Tensor:
-        """
-        _default sanitizer replaces NaNs with 1e-6
-        """
-        tensor = torch.where(
-            torch.isnan(tensor), torch.ones_like(tensor) * torch.tensor(1e-6), tensor
-        )
-        return tensor
-
-    @staticmethod
-    def _default_retype_labels(tensor: torch.Tensor, task: OpenMLTask) -> torch.Tensor:
-        """
-        _default_retype_labels changes the type of the tensor to long for classification tasks and to float for regression tasks
-        """
-        if isinstance(task, OpenMLClassificationTask):
-            return tensor.long()
-        elif isinstance(task, OpenMLRegressionTask):
-            return tensor.float()
-        else:
-            raise ValueError(task)
-
-    def get_device(
-        self,
-    ):
-        """
-        Checks if a GPU is available and returns the device to be used for training (cuda, mps or cpu)
-        """
-        if torch.cuda.is_available():
-            device = torch.device("cuda")
-        elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
-            device = torch.device("mps")
-        else:
-            device = torch.device("cpu")
-
-        return device
-
-    def default_image_transform(self):
-        return Compose(
-            [
-                ToPILImage(),  # Convert tensor to PIL Image to ensure PIL Image operations can be applied.
-                Lambda(convert_to_rgb),  # Convert PIL Image to RGB if it's not already.
-                Resize((128, 128)),  # Resize the image.
-                ToTensor(),  # Convert the PIL Image back to a tensor.
-            ]
-        )
-
-    def return_model_config(self):
-        """
-        Returns a configuration object for the model
-        """
-
-        return SimpleNamespace(
-            device=self.get_device(),
-            criterion=self._default_criterion_gen,
-            optimizer_gen=self._default_optimizer_gen,
-            scheduler_gen=self._default_scheduler_gen,
-            # predict turns the outputs of the model into actual predictions
-            predict=self._default_predict,  # type: Callable[[torch.Tensor, OpenMLTask], torch.Tensor]
-            # predict_proba turns the outputs of the model into probabilities for each class
-            predict_proba=self._default_predict_proba,  # type: Callable[[torch.Tensor], torch.Tensor]
-            # epoch_count represents the number of epochs the model should be trained for
-            epoch_count=3,  # type: int,
-            # progress_callback=(
-            #     self._default_progress_callback
-            # ),  # type: Callable[[int, int, int, int, float, float], None]
-            # enable progress bar
-            verbose=True,
-        )
-
-    def return_data_config(self):
-        """
-        Returns a configuration object for the data
-        """
-        return SimpleNamespace(
-            type_of_data="image",
-            perform_validation=False,
-            # progress_callback is called when a training step is finished, in order to report the current progress
-            # sanitize sanitizes the input data in order to ensure that models can be trained safely
-            sanitize=self._default_sanitize,  # type: Callable[[torch.Tensor], torch.Tensor]
-            # retype_labels changes the types of the labels in order to ensure type compatibility
-            retype_labels=(self._default_retype_labels),  # type: Callable[[torch.Tensor, OpenMLTask], torch.Tensor]
-            # image_size is the size of the images that are fed into the model
-            image_size=128,
-            # batch_size represents the processing batch size for training
-            batch_size=64,  # type: int
-            data_augmentation=None,
-            validation_split=0.1,
-            transform=self.default_image_transform(),
-        )
-
-
-class BaseDataHandler:
-    """
-    BaseDataHandler class is an abstract base class for data handling operations.
-    """
-
-    def prepare_data(
-        self, X_train, y_train, X_val, y_val, data_config: SimpleNamespace
-    ):
-        raise NotImplementedError
-
-    def prepare_test_data(self, X_test, data_config: SimpleNamespace):
-        raise NotImplementedError
-
-
-class OpenMLImageHandler(BaseDataHandler):
-    """
-    OpenMLImageHandler is a class that extends BaseDataHandler to handle image data from OpenML datasets.
-    """
-
-    def prepare_data(self, X_train, y_train, X_val, y_val, data_config=None):
-        train = OpenMLImageDataset(
-            image_dir=data_config.file_dir,
-            X=X_train,
-            y=y_train,
-            transform_x=data_config.transform,
-            image_size=data_config.image_size,
-        )
-        val = OpenMLImageDataset(
-            image_dir=data_config.file_dir,
-            X=X_val,
-            y=y_val,
-            transform_x=data_config.transform,
-            image_size=data_config.image_size,
-        )
-        return train, val
-
-    def prepare_test_data(self, X_test, data_config=None):
-        test = OpenMLImageDataset(
-            image_dir=data_config.file_dir,
-            X=X_test,
-            y=None,
-            transform_x=data_config.transform,
-            image_size=data_config.image_size,
-        )
-        return test
-
-
-class OpenMLTabularHandler(BaseDataHandler):
-    """
-    OpenMLTabularHandler is a class that extends BaseDataHandler to handle tabular data from OpenML datasets.
-    """
-
-    def prepare_data(self, X_train, y_train, X_val, y_val, data_config=None):
-        train = OpenMLTabularDataset(X=X_train, y=y_train)
-        val = OpenMLTabularDataset(X=X_val, y=y_val)
-        return train, val
-
-    def prepare_test_data(self, X_test, data_config=None):
-        test = OpenMLTabularDataset(X=X_test, y=None)
-        return test
-
-
-# Dictionary mapping data types to handlers
-data_handlers = {
-    "image": OpenMLImageHandler(),
-    "dataframe": OpenMLTabularHandler(),
-    # Add new data types here
-}
-
-
 class DataContainer:
-    """
-    class DataContainer:
-        A class to contain the training, validation, and test data loaders. This just makes it easier to access them when required.
+    """Container for training, validation, and test data loaders."""
+    
+    def __init__(self, train_dl: DataLoader, valid_dl: Optional[DataLoader], test_dl: DataLoader, model_classes: List[Any]):
+        self.train_dl, self.valid_dl, self.test_dl = train_dl, valid_dl, test_dl
+        self.model_classes = model_classes
 
-        Attributes:
-        train_dl: DataLoader object for the training data.
-        valid_dl: DataLoader object for the validation data.
-        test_dl: Optional DataLoader object for the test data.
-    """
+    @property
+    def train_ds(self): return self.train_dl.dataset
+    
+    @property
+    def valid_ds(self): 
+        if self.valid_dl is not None:
+            return self.valid_dl.dataset
+        else:
+            return None
+    
+    @property
+    def test_ds(self): return self.test_dl.dataset if self.test_dl else None
 
+
+class DataModule:
     def __init__(
+        self, batch_size: int, num_workers: int, target_mode: str, transforms=None
+    ):
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.target_mode = target_mode
+        self.transforms = transforms
+        self.model_classes = None
+
+    def _split_data(self, X, y, create_validation: bool):
+        """
+        Split the data into training, validation, and test sets.
+        """
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
+        X_valid, y_valid = (None, None)
+
+        if create_validation:
+            X_train, X_valid, y_train, y_valid = train_test_split(
+                X_train, y_train, test_size=0.2, random_state=42
+            )
+
+        return X_train, y_train, X_test, y_test, X_valid, y_valid
+
+    def _encode_labels(self, y_train, y_test, y_valid):
+        """
+        Encode the labels of the datasets using a label encoder if the target_mode is categorical.
+        """
+        if self.target_mode == "categorical":
+            self.model_classes = (
+                y_train.unique()
+                if isinstance(y_train, pd.Series)
+                else list(set(y_train))
+            )
+            return self.encode_labels_for_datasets(y_train, y_test, y_valid)
+        return y_train, y_test, y_valid
+    
+    def _create_data_container(
         self,
-        train_dl: DataLoader,
-        valid_dl: torch.utils.data.DataLoader,
-        test_dl: torch.utils.data.DataLoader = None,
-    ):  # type: ignore
-        self.train_dl, self.valid_dl = train_dl, valid_dl
-        self.test_dl = test_dl
-
-    @property
-    def train_ds(self):
-        return self.train_dl.dataset
-
-    @property
-    def valid_ds(self):
-        return self.valid_dl.dataset
-
-    @property
-    def test_ds(self):
-        return self.test_dl.dataset
-
-
-class OpenMLDataModule:
-    def __init__(
-        self,
-        type_of_data="image",
-        filename_col="Filename",
-        file_dir="images",
-        target_mode="categorical",
-        transform=None,
-        target_column="encoded_labels",
+        dataset_class,
+        X_train,
+        y_train,
+        X_test,
+        y_test,
+        X_valid,
+        y_valid,
+        create_validation,
+        model_classes,
+        *args,
         **kwargs,
     ):
-        self.config_gen = DefaultConfigGenerator()
-        self.data_config = self.config_gen.return_data_config()
-        self.data_config.type_of_data = type_of_data
-        self.data_config.filename_col = filename_col
-        self.data_config.file_dir = file_dir
-        self.data_config.target_mode = target_mode
-        self.data_config.target_column = target_column
-        self.handler: BaseDataHandler | None = data_handlers.get(type_of_data)
-
-        if transform is not None:
-            self.data_config.transform = transform
-
-        if not self.handler:
-            raise ValueError(f"Data type {type_of_data} not supported.")
-
-    def get_data(
-        self,
-        X_train: pd.DataFrame,
-        y_train: Optional[pd.Series],
-        X_test: pd.DataFrame,
-        task,
-    ):
-        # Split the training data
-        X_train_train, X_val, y_train_train, y_val = self.split_training_data(X_train, y_train)
-
-        y_train_train, y_val, model_classes = self.encode_labels(y_train_train, y_val)
-
-        # Use handler to prepare datasets
-        train_loader, val_loader = self.prepare_datasets_for_training_and_validation(X_train_train, X_val, y_train_train, y_val)
-
-        # Prepare test data
-        test_loader = self.process_test_data(X_test)
-
-        return DataContainer(train_loader, val_loader, test_loader), model_classes
-
-    def process_test_data(self, X_test):
-        test = self.handler.prepare_test_data(X_test, self.data_config)
-        test_loader = DataLoader(
-            test, batch_size=self.data_config.batch_size, shuffle=False
-        )
-        
-        return test_loader
-
-    def prepare_datasets_for_training_and_validation(self, X_train_train, X_val, y_train_train, y_val):
-        if self.handler is None:
-            raise ValueError(
-                f"Data type {self.data_config.type_of_data} not supported."
-            )
-
-        train, val = self.handler.prepare_data(
-            X_train_train, y_train_train, X_val, y_val, self.data_config
-        )
-
-        train_loader = DataLoader(
-            train, batch_size=self.data_config.batch_size, shuffle=True
-        )
-        val_loader = DataLoader(
-            val, batch_size=self.data_config.batch_size, shuffle=False
-        )
-        
-        return train_loader,val_loader
-
-    def encode_labels(self, y_train_train, y_val):
         """
-        Encode the labels for categorical data
+        Create a DataContainer object from the provided datasets. This makes it easier to access the datasets in one object.
         """
-        if self.data_config.target_mode == "categorical":
-            label_encoder = preprocessing.LabelEncoder().fit(y_train_train)
-            y_train_train = pd.Series(label_encoder.transform(y_train_train))
-            y_val = pd.Series(label_encoder.transform(y_val))
-            # Determine model classes
-            model_classes = (
-                label_encoder.classes_
-                if self.data_config.target_mode == "categorical"
+        train_ds = dataset_class(X_train, y_train, *args,**kwargs, transform_x=self.transforms)
+        test_ds = dataset_class(X_test, y_test, *args,**kwargs, transform_x=self.transforms)
+        valid_ds = (
+            dataset_class(X_valid, y_valid, *args,**kwargs,  transform_x=self.transforms)
+            if create_validation
+            else None
+        )
+
+        return DataContainer(
+            train_dl=DataLoader(
+                train_ds, batch_size=self.batch_size, num_workers=self.num_workers
+            ),
+            valid_dl=(
+                DataLoader(
+                    valid_ds, batch_size=self.batch_size, num_workers=self.num_workers
+                )
+                if valid_ds
                 else None
-            )
-            
-        return y_train_train,y_val,model_classes
-
-    def split_training_data(self, X_train, y_train):
-        if type(y_train) != pd.Series:
-            y_train = pd.Series(y_train)
-
-        X_train_train, X_val, y_train_train, y_val = train_test_split(
-            X_train,
-            y_train,
-            test_size=self.data_config.validation_split,
-            shuffle=True,
-            stratify=y_train,
-            random_state=0,
+            ),
+            test_dl=DataLoader(
+                test_ds, batch_size=self.batch_size, num_workers=self.num_workers
+            ), model_classes = model_classes
         )
-        
-        return X_train_train,X_val,y_train_train,y_val
 
+    def encode_labels_for_datasets(self, y_train, y_test, y_valid):
+        """
+        Encode the labels of the datasets using a label encoder if the target_mode is categorical.
+        """
+        label_encoder = preprocessing.LabelEncoder().fit(y_train)
+        self.model_classes = label_encoder.classes_
+        y_train = self.encode_labels(y_train, label_encoder=label_encoder)  # type: ignore
+        if y_test is not None:
+            y_test = self.encode_labels(y_test, label_encoder=label_encoder)
+        if y_valid is not None:
+            y_valid = self.encode_labels(y_valid, label_encoder=label_encoder)
+        
+        # convert to tensor
+        y_train = torch.tensor(y_train)
+        y_test = torch.tensor(y_test)
+        y_valid = torch.tensor(y_valid)
+
+        return y_train, y_test, y_valid
+
+    def encode_labels(
+        self,
+        y: Union[pd.Series, list, np.ndarray],
+        label_encoder: preprocessing.LabelEncoder,
+    ):
+        """Encode the labels using the provided label encoder."""
+        return label_encoder.transform(y)
+    
+    def load_tabular_openml_dataset(
+        self, dataset_id: int, create_validation_dataset: bool = True
+    ):
+        """
+        Load a tabular dataset from OpenML into a DataContainer object.
+        """
+        dataset = openml.datasets.get_dataset(dataset_id, download_data=True)
+        X, y = dataset.get_data(
+            target=dataset.default_target_attribute, dataset_format="dataframe"
+        )
+        if y is None:
+            raise ValueError("Target variable 'y' cannot be None.")
+
+        X_train, y_train, X_test, y_test, X_valid, y_valid = self._split_data(
+            X, y, create_validation_dataset
+        )
+        y_train, y_test, y_valid = self._encode_labels(y_train, y_test, y_valid)
+
+        self.model_classes = y_train.unique() if isinstance(y_train, pd.Series) else list(set(y_train))
+
+        return self._create_data_container(
+            OpenMLTabularDataset,
+            X_train = X_train,
+            y_train = y_train,
+            X_test = X_test,
+            y_test = y_test,
+            X_valid = X_valid,
+            y_valid = y_valid,
+            create_validation = create_validation_dataset,
+            model_classes=self.model_classes,
+        )
+
+    def load_image_openml_dataset(
+        self,
+        dataset_id: int,
+        image_dir: str,
+        image_size: int,
+        filename_col: str,
+        target_column: str,
+        create_validation_dataset: bool = True,
+    ):
+        """
+        Load an image dataset from OpenML into a DataContainer object."""
+        dataset = openml.datasets.get_dataset(
+            dataset_id, download_data=True
+        ).get_data()[0]
+        X, y = dataset[filename_col], dataset[target_column]
+        X_train, y_train, X_test, y_test, X_valid, y_valid = self._split_data(
+            X, y, create_validation_dataset
+        )
+        y_train, y_test, y_valid = self._encode_labels(y_train, y_test, y_valid)
+
+        self.model_classes = y_train.unique() if isinstance(y_train, pd.Series) else list(set(y_train))
+
+        return self._create_data_container(
+            OpenMLImageDataset,
+            X_train = X_train,
+            y_train = y_train,
+            X_test = X_test,
+            y_test = y_test,
+            X_valid = X_valid,
+            y_valid = y_valid,
+            create_validation = create_validation_dataset,
+            image_dir = image_dir,
+            image_size = image_size,
+            model_classes=self.model_classes,
+        )
+
+    def load_tabular_openml_dataset_from_task_id(
+        self, task_id: int, create_validation_dataset: bool = True
+    ):
+        """
+        Load a tabular dataset from an OpenML task ID into a DataContainer object.
+        """
+        dataset_id = openml.tasks.get_task(task_id).dataset_id
+        self.load_tabular_openml_dataset(dataset_id, create_validation_dataset)
+    
+    def load_image_openml_dataset_from_task_id(
+        self,
+        task_id: int,
+        image_dir: str,
+        image_size: int,
+        filename_col: str,
+        target_column: str,
+        create_validation_dataset: bool = True,
+    ):
+        """
+        Load an image dataset from an OpenML task ID into a DataContainer object.
+        """
+        dataset_id = openml.tasks.get_task(task_id).dataset_id
+        self.load_image_openml_dataset(
+            dataset_id,
+            image_dir,
+            image_size,
+            filename_col,
+            target_column,
+            create_validation_dataset
+        )
+    
+    def load_custom_dataloaders(self, train_dl: DataLoader, test_dl: DataLoader, valid_dl: Optional[DataLoader] = None):
+        """
+        Load the dataloaders from the provided data loaders into a DataContainer object.
+        """
+        y_train = train_dl.dataset.y
+        self.model_classes = y_train.unique() if isinstance(y_train, pd.Series) else list(set(y_train))
+        return DataContainer(train_dl, valid_dl, test_dl, self.model_classes)
+
+
+
+# class Trainer:
+#     def __init__(
+#         self,
+#         experiment_name: str,
+#         dl,  # Removed DataContainer typing to avoid dependency issues
+#         model: Any,
+#         opt=torch.optim.Adam,
+#         loss_fn=torch.nn.CrossEntropyLoss,
+#         metrics: List[Callable] = [accuracy],
+#         callbacks: List[Callback] = [],
+#         use_tensorboard: bool = True,
+#         device: torch.device = torch.device("cpu"),
+#         **kwargs,
+#     ):
+#         self.experiment_name = experiment_name
+#         self.data = dl  # Store dataset
+#         self.model = model.to(device)
+#         self.opt = opt(self.model.parameters())
+#         self.loss_fn = loss_fn
+#         self.metrics = metrics
+#         self.device = device if device else self.get_device()
+
+#         self.loss = 0
+#         self.in_train = False
+#         self.training_state = True
+
+#         # Logging setup
+#         self.logger: logging.Logger = logging.getLogger(__name__)
+#         self.phases = [0.2, 0.8]
+#         self.scheds = combine_scheds(self.phases, [sched_cos(1e-4, 1e-2), sched_cos(1e-3, 1e-5)])
+
+#         # TensorBoard setup
+#         self.use_tensorboard = use_tensorboard
+#         self.tensorboard_writer = None
+#         if use_tensorboard:
+#             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+#             self.tensorboard_writer = SummaryWriter(
+#                 comment=experiment_name,
+#                 log_dir=f"tensorboard_logs/{experiment_name}/{timestamp}",
+#             )
+
+#         # Callbacks setup
+#         self.callbacks = callbacks
+#         self.cbfs = [
+#             Recorder,
+#             partial(AvgStatsCallback, self.metrics),
+#             partial(ParamScheduler, "lr", self.scheds),
+#             partial(PutDataOnDeviceCallback, self.device),
+#         ]
+#         if self.tensorboard_writer:
+#             self.cbfs.append(partial(TensorBoardCallback, self.tensorboard_writer))
+
+#         self.add_callbacks()
+#         self.cbs = [TrainEvalCallback()] + [cbf() for cbf in self.cbfs]
+
+#     def get_device(self):
+#         """Detects and returns the best available device (CUDA, MPS, or CPU)."""
+#         if torch.cuda.is_available():
+#             return torch.device("cuda")
+#         elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+#             return torch.device("mps")
+#         return torch.device("cpu")
+
+#     def add_callbacks(self):
+#         """Adds the user-defined callbacks to the list of callbacks."""
+#         for callback in self.callbacks:
+#             if callback not in self.cbfs:
+#                 self.cbfs.append(callback)
+
+#     def one_batch(self, xb, yb):
+#         """Processes a single batch in training."""
+#         try:
+#             self.xb, self.yb = xb.to(self.device), yb.to(self.device)
+#             self.model.train()
+            
+#             self("begin_batch")
+#             global sample_input
+#             sample_input = xb
+
+#             self.pred = self.model(xb)
+#             self("after_pred")
+
+#             self.loss = self.loss_fn(self.pred, yb)
+#             self("after_loss")
+
+#             if self.in_train:
+#                 self.loss.backward()
+#                 self("after_backward")
+#                 self.opt.step()
+#                 self("after_step")
+#                 self.opt.zero_grad()
+#         except CancelBatchException:
+#             self("after_cancel_batch")
+#         finally:
+#             self("after_batch")
+
+#     def all_batches(self, dl):
+#         """Processes all batches in an epoch."""
+#         self.iters = len(dl)
+#         try:
+#             for xb, yb in tqdm(dl, leave=False):
+#                 self.one_batch(xb, yb)
+#         except CancelEpochException:
+#             self("after_cancel_epoch")
+
+#     def fit(self, epochs):
+#         """Runs the full training process."""
+#         self.epochs, self.loss = epochs, torch.tensor(0.0)
+#         try:
+#             for cb in self.cbs:
+#                 cb.set_runner(self)
+#             self("begin_fit")
+
+#             for epoch in range(epochs):
+#                 self.epoch = epoch
+#                 self.in_train = True
+#                 if not self("begin_epoch"):
+#                     self.all_batches(self.data.train_dl)
+
+#                 self.in_train = False
+#                 with torch.no_grad():
+#                     if not self("begin_validate"):
+#                         self.all_batches(self.data.valid_dl)
+
+#                 self("after_epoch")
+#         except CancelTrainException:
+#             self("after_cancel_train")
+#         finally:
+#             self("after_fit")
+#             self.in_train = False
+
+#     def export_to_onnx(self):
+#         """Converts the model to ONNX format."""
+#         global sample_input
+#         f = io.BytesIO()
+#         torch.onnx.export(self.model, sample_input, f)
+#         return f.getvalue()
+
+#     def export_to_netron(self, onnx_file_name="model.onnx"):
+#         """Exports and serves the model using Netron."""
+#         onnx_data = self.export_to_onnx()
+#         with open(onnx_file_name, "wb") as f:
+#             f.write(onnx_data)
+#         print(f"ONNX model saved to {onnx_file_name}. Delete if needed.")
+#         netron.start(onnx_file_name)
+
+#     def _prediction_to_probabilities(self, y: np.ndarray, classes: List[Any]) -> np.ndarray:
+#         """Transforms predicted probabilities to match OpenML class indices."""
+#         if not isinstance(classes, list):
+#             raise ValueError("Classes must be a list.")
+#         result = np.zeros((len(y), len(classes)), dtype=np.float32)
+#         for obs, prediction_idx in enumerate(y):
+#             result[obs][prediction_idx] = 1.0
+#         return result
+
+#     def train(self, num_epochs: int):
+#         """Runs the training loop."""
+#         self.model.train()
+#         self.fit(num_epochs)
+#         self.model.eval()
+
+#     def __call__(self, cb_name):
+#         """Calls the appropriate callback function."""
+#         res = False
+#         for cb in sorted(self.cbs, key=lambda x: x._order):
+#             res = cb(cb_name) and res
+#         return res
 
 class ModelRunner:
     def __init__(self, cbs=None, cb_funcs=None):
@@ -432,8 +481,8 @@ class ModelRunner:
         return self.learn.model
 
     @property
-    def criterion(self):
-        return self.learn.criterion
+    def loss_fn(self):
+        return self.learn.loss_fn
 
     @property
     def data(self):
@@ -450,14 +499,15 @@ class ModelRunner:
     def one_batch(self, xb, yb):
         try:
             self.xb, self.yb = xb, yb
-
-            self("begin_batch")
+            self.xb = self.xb.to(self.learn.device)
+            self.yb = self.yb.to(self.learn.device)
             # Below two lines are hack to convert model to onnx
             global sample_input
             sample_input = self.xb
+            self("begin_batch")
             self.pred = self.model(self.xb)
             self("after_pred")
-            self.loss = self.criterion(self.pred, self.yb)
+            self.loss = self.loss_fn(self.pred, self.yb)
             self("after_loss")
             if not self.in_train:
                 return
@@ -474,7 +524,7 @@ class ModelRunner:
     def all_batches(self, dl):
         self.iters = len(dl)
         try:
-            for xb, yb in tqdm(dl, leave=False):
+            for xb, yb in tqdm(dl, leave=False, desc="Batches"):
                 self.one_batch(xb, yb)
         except CancelEpochException:
             self("after_cancel_epoch")
@@ -485,7 +535,7 @@ class ModelRunner:
             for cb in self.cbs:
                 cb.set_runner(self)
             self("begin_fit")
-            for epoch in range(epochs):
+            for epoch in tqdm(range(epochs), leave=False, desc= "Epochs"):
                 self.epoch = epoch
                 if not self("begin_epoch"):
                     self.all_batches(self.data.train_dl)
@@ -507,72 +557,42 @@ class ModelRunner:
 
 
 class Learner:
-    """
-    A class to store the model, optimizer, criterion, and data loaders for training and evaluation.
-    """
-
-    def __init__(self, model, opt, criterion, data, model_classes, device="cpu"):
+    def __init__(self, model, opt, loss_fn, data, model_classes):
         (
             self.model,
             self.opt,
-            self.criterion,
+            self.loss_fn,
             self.data,
             self.model_classes,
-            self.device,
-        ) = (model, opt, criterion, data, model_classes, device)
+        ) = (model, opt, loss_fn, data, model_classes)
 
-
-class OpenMLTrainerModule:
-    def _default_progress_callback(
-        self, fold: int, rep: int, epoch: int, step: int, loss: float, accuracy: float
-    ):
-        # todo : move this into callback
-        """
-                _default_progress_callback reports the current fold, rep, epoch, step and loss for every
-        training iteration to the default logger
-        """
-        self.logger.info(
-            "[%d, %d, %d, %d] loss: %.4f, accuracy: %.4f"
-            % (fold, rep, epoch, step, loss, accuracy)
-        )
-
-    def __init__(
-        self,
-        experiment_name: str,
-        data_module: OpenMLDataModule,
-        callbacks: List[Callback] = [],
-        use_tensorboard: bool = True,
-        **kwargs,
-    ):
+class Trainer:
+    def __init__(self, experiment_name:str, task_type:str, dl:DataContainer, model: Any, opt, loss_fn, metrics: List[Callable], callbacks: List[Callback], use_tensorboard: bool = True, device: torch.device = torch.device("cpu")):
         self.experiment_name = experiment_name
-        self.config_gen = DefaultConfigGenerator()
-        self.model_config = self.config_gen.return_model_config()
-        self.data_module = data_module
+        self.dl = dl
+        self.model = model
+        self.opt = opt
+        self.loss_fn = loss_fn
+        self.metrics = metrics
+        self.device = device if device else self.get_device()
+        self.loss = 0
+        self.in_train = False
+        self.training_state = True
+        self.task_type = task_type
+        self.logger = logging.getLogger(__name__)
+        self.use_tensorboard = use_tensorboard
         self.callbacks = callbacks
+        self.onnx_model = None
 
-        self.config = SimpleNamespace(
-            **{**self.model_config.__dict__, **self.data_module.data_config.__dict__}
-        )
-        # update the config with the user defined values
-        self.config.__dict__.update(kwargs)
-        self.config.progress_callback = self._default_progress_callback
-        self.logger: logging.Logger = logging.getLogger(__name__)
-
-        self.user_defined_measures = OrderedDict()
         # Tensorboard support
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.tensorboard_writer = None
-
         if use_tensorboard:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             self.tensorboard_writer = SummaryWriter(
                 comment=experiment_name,
                 log_dir=f"tensorboard_logs/{experiment_name}/{timestamp}",
             )
-
-        # self.callbacks.append(LoggingCallback(self.logger, print_output=False))
-        self.loss = 0
-        self.training_state = True
-
+        
         self.phases = [0.2, 0.8]
         self.scheds = combine_scheds(
             self.phases, [sched_cos(1e-4, 1e-2), sched_cos(1e-3, 1e-5)]
@@ -581,92 +601,15 @@ class OpenMLTrainerModule:
         # Add default callbacks
         self.cbfs = [
             Recorder,
-            partial(AvgStatsCallback, accuracy),
+            partial(AvgStatsCallback, self.metrics),
             partial(ParamScheduler, "lr", self.scheds),
-            partial(PutDataOnDeviceCallback, self.config.device),
+            partial(PutDataOnDeviceCallback, self.device),
         ]
         if self.tensorboard_writer is not None:
             self.cbfs.append(partial(TensorBoardCallback, self.tensorboard_writer))
 
         self.add_callbacks()
-
-    def export_to_onnx(self, model_copy):
-        """
-        Converts the model to ONNX format. Uses a hack for now (global variable) to get the sample input.
-        """
-        global sample_input
-        f = io.BytesIO()
-        torch.onnx.export(model_copy, sample_input, f)
-        onnx_model = onnx.load_model_from_string(f.getvalue())
-        onnx_ = onnx_model.SerializeToString()
-        global last_models
-        last_models = onnx_
-        return onnx_
-
-    def export_to_netron(self, onnx_file_name: str = f"model.onnx"):
-        """
-        Exports the model to ONNX format and serves it using netron.
-        """
-        if self.onnx_model is None:
-            try:
-                self.onnx_model = self.export_to_onnx(self.model)
-            except Exception as e:
-                raise ValueError("Model is not defined")
-            raise ValueError("Model is not defined")
-
-        # write the onnx model to a file
-        with open(onnx_file_name, "wb") as f:
-            f.write(self.onnx_model)
-            print(f"Writing onnx model to {onnx_file_name}. Delete if neeeded")
-
-        # serve with netro
-        netron.start(onnx_file_name)
-
-    def run_model_on_fold(
-        self,
-        model: torch.nn.Module,
-        task: OpenMLTask,
-        X_train: pd.DataFrame,
-        rep_no: int,
-        fold_no: int,
-        y_train: Optional[pd.Series],
-        X_test: pd.DataFrame,
-    ):
-        # if task has no class labels, we assign the class labels to be the unique values in the training set
-        if task.class_labels is None:
-            task.class_labels = y_train.unique()
-
-        # Add the user defined callbacks
-
-        self.model = copy.deepcopy(model)
-
-        try:
-            data, model_classes = self.run_training(task, X_train, y_train, X_test)
-
-        except AttributeError as e:
-            # typically happens when training a regressor8 on classification task
-            raise PyOpenMLError(str(e))
-
-        # In supervised learning this returns the predictions for Y
-        pred_y, proba_y = self.run_evaluation(task, data, model_classes)
-
-        # Convert predictions to class labels
-        if task.class_labels is not None:
-            pred_y = [task.class_labels[i] for i in pred_y]
-
-        # Convert model to onnx
-        onnx_ = self.export_to_onnx(self.model)
-
-        # Hack to store the last model for ONNX conversion
-        global last_models
-        # last_models = onnx_
-        self.onnx_model = onnx_
-
-        return pred_y, proba_y, self.user_defined_measures, None
-
-    def check_config(self):
-        raise NotImplementedError
-
+    
     def _prediction_to_probabilities(
         self, y: np.ndarray, classes: List[Any]
     ) -> np.ndarray:
@@ -695,109 +638,7 @@ class OpenMLTrainerModule:
         for obs, prediction_idx in enumerate(y):
             result[obs][prediction_idx] = 1.0
         return result
-
-    def run_evaluation(self, task, data, model_classes):
-        if isinstance(task, OpenMLSupervisedTask):
-            self.model.eval()
-            pred_y = self.pred_test(task, self.model, data.test_dl, self.config.predict)
-        else:
-            raise ValueError(task)
-
-        if isinstance(task, OpenMLClassificationTask):
-            try:
-                self.model.eval()
-                proba_y = self.pred_test(
-                    task, self.model, data.test_dl, self.config.predict_proba
-                )
-
-            except AttributeError:
-                if task.class_labels is not None:
-                    proba_y = self._prediction_to_probabilities(
-                        pred_y, list(task.class_labels)
-                    )
-                else:
-                    raise ValueError("The task has no class labels")
-
-            if task.class_labels is not None:
-                if proba_y.shape[1] != len(task.class_labels):
-                    # Remap the probabilities in case there was a class missing
-                    # at training time. By default, the classification targets
-                    # are mapped to be zero-based indices to the actual classes.
-                    # Therefore, the model_classes contain the correct indices to
-                    # the correct probability array. Example:
-                    # classes in the dataset: 0, 1, 2, 3, 4, 5
-                    # classes in the training set: 0, 1, 2, 4, 5
-                    # then we need to add a column full of zeros into the probabilities
-                    # for class 3 because the rest of the library expects that the
-                    # probabilities are ordered the same way as the classes are ordered).
-                    proba_y_new = np.zeros((proba_y.shape[0], len(task.class_labels)))
-                    for idx, model_class in enumerate(model_classes):
-                        proba_y_new[:, model_class] = proba_y[:, idx]
-                    proba_y = proba_y_new
-
-                if proba_y.shape[1] != len(task.class_labels):
-                    message = "Estimator only predicted for {}/{} classes!".format(
-                        proba_y.shape[1],
-                        len(task.class_labels),
-                    )
-                    warnings.warn(message)
-                    self.logger.warning(message)
-            else:
-                raise ValueError("The task has no class labels")
-
-        elif isinstance(task, OpenMLRegressionTask):
-            proba_y = None
-
-        else:
-            raise TypeError(type(task))
-        return pred_y, proba_y
-
-    def run_training(self, task, X_train, y_train, X_test):
-        if isinstance(task, OpenMLSupervisedTask) or isinstance(
-            task, OpenMLClassificationTask
-        ):
-            self.opt = self.config.optimizer_gen(self.model, task)(
-                self.model.parameters()
-            )
-
-            self.criterion = self.config.criterion(task)
-            self.device = self.config.device
-
-            if self.config.device != "cpu":
-                self.criterion = self.criterion.to(self.config.device)
-
-            data, model_classes = self.data_module.get_data(
-                X_train, y_train, X_test, task
-            )
-            self.learn = Learner(
-                self.model,
-                self.opt,
-                self.criterion,
-                data,
-                model_classes,
-            )
-            self.learn.device = self.device
-            self.learn.model.to(self.device)
-            gc.collect()
-
-            self.runner = ModelRunner(cb_funcs=self.cbfs)
-
-            # some additional default callbacks
-            self.plot_loss = self.runner.cbs[1].plot_loss
-            self.plot_lr = self.runner.cbs[1].plot_lr
-            self.model_classes = model_classes
-
-            self.learn.model.train()
-            self.runner.fit(epochs=self.config.epoch_count, learn=self.learn)
-            self.learn.model.eval()
-
-            self.lrs = self.runner.cbs[1].lrs
-
-            print("Loss", self.runner.loss)
-        else:
-            raise Exception("OpenML Task type not supported")
-        return data, model_classes
-
+    
     def add_callbacks(self):
         """
         Adds the user-defined callbacks to the list of callbacks
@@ -810,20 +651,190 @@ class OpenMLTrainerModule:
                     # replace the callback with the new one in the same position
                     self.cbfs[self.cbfs.index(callback)] = callback
 
+    def export_to_onnx(self, model_copy):
+        """
+        Converts the model to ONNX format. Uses a hack for now (global variable) to get the sample input.
+        """
+        global sample_input
+        f = io.BytesIO()
+        torch.onnx.export(model_copy, sample_input, f)
+        onnx_model = onnx.load_model_from_string(f.getvalue())
+        onnx_ = onnx_model.SerializeToString()
+        global last_models
+        last_models = onnx_
+        return onnx_
+
+    def export_to_netron(self, onnx_file_name: str = f"model.onnx"):
+        """
+        Exports the model to ONNX format and serves it using netron.
+        """
+        if self.onnx_model is None:
+            try:
+                self.onnx_model = self.export_to_onnx(self.model)
+            except Exception as e:
+                raise ValueError("Model is not defined")
+
+        # write the onnx model to a file
+        with open(onnx_file_name, "wb") as f:
+            f.write(self.onnx_model)
+            print(f"Writing onnx model to {onnx_file_name}. Delete if neeeded")
+
+        # serve with netro
+        netron.start(onnx_file_name)
+    
+    def train(self, epoch_count):
+        """
+        Runs the training loop.
+        """
+        self.opt = self.opt(self.model.parameters())
+
+        self.learn = Learner(
+            model=self.model,
+            opt=self.opt,
+            loss_fn=self.loss_fn,
+            data=self.dl,
+            model_classes=self.dl.model_classes,
+        )
+        self.learn.device = self.device
+
+        self.runner = ModelRunner(cb_funcs=self.cbfs)
+
+        # some additional default callbacks
+        self.plot_loss = self.runner.cbs[1].plot_loss
+        self.plot_lr = self.runner.cbs[1].plot_lr
+        # self.lrs = self.runner.cbs[1].lrs
+        # self.losses = self.runner.cbs[1].losses
+
+        self.learn.model.train()
+        self.runner.fit(epochs=epoch_count, learn=self.learn)
+        self.learn.model.eval()
+
+        self.evaluate()
+    
+    def evaluate(self):
+        """
+        Evaluates the model on the test set.
+        """
+        self.model_copy = copy.deepcopy(self.model)
+        if self.task_type == "regression":
+            self.model.eval()
+            pred_y = self.pred_test(self.task_type, self.model_copy, self.dl.test_dl, self._default_predict)
+        
+        elif self.task_type == "classification":
+            self.model.eval()
+            self.pred_y = self.pred_test(self.task_type, self.model_copy, self.dl.test_dl, self._default_predict)
+            self.pred_y_proba = self.pred_test(self.task_type, self.model_copy, self.dl.test_dl, self._default_predict_proba)
+
+        return self.pred_y, self.pred_y_proba
+    
+    def _default_predict(self,output: torch.Tensor, task: str) -> torch.Tensor:
+        """
+        _default_predict turns the outputs into predictions by returning the argmax of the output tensor for classification tasks, and by flattening the prediction in case of the regression
+        """
+        output_axis = output.dim() - 1
+        if task == "classification":
+            output = torch.argmax(output, dim=output_axis)
+        elif task == "regression":
+            output = output.view(-1)
+        else:
+            raise ValueError(task)
+        return output
+
+    def _default_predict_proba(self,
+        output: torch.Tensor, task: str
+    ) -> torch.Tensor:
+        """
+        _default_predict_proba turns the outputs into probabilities using softmax
+        """
+        output_axis = output.dim() - 1
+        output = output.softmax(dim=output_axis)
+        return output
+    
+    def sanitize(self,tensor):
+        return torch.where(
+            torch.isnan(tensor), torch.ones_like(tensor) * torch.tensor(1e-6), tensor)
+    
     def pred_test(self, task, model_copy, test_loader, predict_func):
         probabilities = []
         for batch_idx, inputs in enumerate(test_loader):
-            inputs = self.config.sanitize(inputs)
+            inputs = inputs[0]
+            
+            inputs = self.sanitize(inputs)
             # if torch.cuda.is_available():
-            inputs = inputs.to(self.config.device)
+            inputs = inputs.to(self.device)
 
-            # Perform inference on the batch
-            pred_y_batch = model_copy(inputs)
-            pred_y_batch = predict_func(pred_y_batch, task)
-            pred_y_batch = pred_y_batch.cpu().detach().numpy()
+            # perform inference
+            with torch.no_grad():
+                output = model_copy(inputs)
+                probabilities.append(predict_func(output, task))
+        return torch.cat(probabilities).cpu().numpy()
+    
+#   def _run_model_on_fold(
+#         self,
+#         model: Any,
+#         task: "OpenMLTask",
+#         X_train: Union[np.ndarray, scipy.sparse.spmatrix, pd.DataFrame],
+#         rep_no: int,
+#         fold_no: int,
+#         y_train: Optional[np.ndarray] = None,
+#         X_test: Optional[Union[np.ndarray, scipy.sparse.spmatrix, pd.DataFrame]] = None,
+#     ) -> Tuple[
+#         np.ndarray,
+#         np.ndarray,
+#         "OrderedDict[str, float]",
+#         Optional[OpenMLRunTrace],
+#         Optional[Any],
+#     ]: 
+#         
 
-            probabilities.append(pred_y_batch)
+    def run_model_on_fold(self, model: Any, task: OpenMLTask, X_train: Union[np.ndarray, pd.DataFrame], rep_no: int, fold_no: int, y_train: Optional[np.ndarray] = None, X_test: Optional[Union[np.ndarray, pd.DataFrame]] = None):
+        """
+        Runs the model on a single fold of the data.
 
-            # Concatenate probabilities from all batches
-        pred_y = np.concatenate(probabilities, axis=0)
-        return pred_y
+        Parameters
+        ----------
+        model : Any
+            The model to be trained and evaluated.
+        task : OpenMLTask
+            The task to be performed.
+        X_train : Union[np.ndarray, pd.DataFrame]
+            The training data.
+        rep_no : int
+            The repetition number.
+        fold_no : int
+            The fold number.
+        y_train : Optional[np.ndarray], optional
+            The training labels, by default None.
+        X_test : Optional[Union[np.ndarray, pd.DataFrame]], optional
+            The test data, by default None.
+
+        Returns
+        -------
+        Tuple[np.ndarray, np.ndarray, OrderedDict[str, float], Optional[OpenMLRunTrace], Optional
+        """
+        # set the model to evaluation
+        model.eval()
+        # get the data
+        if y_train is not None:
+            y_train = torch.tensor(y_train)
+        X_train = torch.tensor(X_train)
+        X_test = torch.tensor(X_test)
+        # get the data loader
+        train_dl = DataLoader(X_train, batch_size=32, shuffle=True)
+        test_dl = DataLoader(X_test, batch_size=32, shuffle=False)
+        # create the learner
+
+        learn = Learner(
+            model=model,
+            opt=torch.optim.Adam(model.parameters()),
+            loss_fn=torch.nn.CrossEntropyLoss(),
+            data=DataContainer(train_dl, None, test_dl, None),
+            model_classes=None
+        )
+        # create the runner
+        runner = ModelRunner()
+        # fit the model
+        runner.fit(1, learn)
+        # evaluate the model
+        pred_y, pred_y_proba = runner.evaluate()
+        return pred_y, pred_y_proba
