@@ -1,3 +1,3 @@
 from .functional import Functional
 
-__all__ = ['Functional']
+__all__ = ["Functional"]

@@ -1,52 +1,45 @@
 """
 This module defines the Pytorch extension for OpenML-python.
 """
-from collections import OrderedDict  # noqa: F401
+
 import copy
-from distutils.version import LooseVersion
 import importlib
 import inspect
+import io
 import json
 import logging
+import os
 import re
 import sys
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import warnings
+from collections import OrderedDict  # noqa: F401
+from distutils.version import LooseVersion
+from types import SimpleNamespace
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
+import onnx
+import openml
 import pandas as pd
-
 import scipy.sparse
 import scipy.special
-from . import config
-from openml_pytorch.trainer import OpenMLTrainerModule
-
 import torch
+import torch.autograd
+import torch.cuda
 import torch.nn
 import torch.optim
 import torch.utils.data
-import torch.autograd
-import torch.cuda
-
-import openml
 from openml.exceptions import PyOpenMLError
 from openml.extensions import Extension, register_extension
 from openml.flows import OpenMLFlow
 from openml.runs.trace import OpenMLRunTrace, OpenMLTraceIteration
-from openml.tasks import (
-    OpenMLTask,
-    OpenMLSupervisedTask,
-    OpenMLClassificationTask,
-    OpenMLRegressionTask,
-)
-from types import SimpleNamespace
-import os 
-
-
+from openml.tasks import (OpenMLClassificationTask, OpenMLRegressionTask,
+                          OpenMLSupervisedTask, OpenMLTask)
 from sklearn import preprocessing
 
-import io
-import onnx
+from openml_pytorch.trainer import OpenMLTrainerModule
+
+from . import config
 
 if sys.version_info >= (3, 5):
     from json.decoder import JSONDecodeError
@@ -55,20 +48,22 @@ else:
 
 
 DEPENDENCIES_PATTERN = re.compile(
-    r'^(?P<name>[\w\-]+)((?P<operation>==|>=|>)'
-    r'(?P<version>(\d+\.)?(\d+\.)?(\d+)?(dev)?[0-9]*))?$'
+    r"^(?P<name>[\w\-]+)((?P<operation>==|>=|>)"
+    r"(?P<version>(\d+\.)?(\d+\.)?(\d+)?(dev)?[0-9]*))?$"
 )
 
 
-SIMPLE_NUMPY_TYPES = [nptype for type_cat, nptypes in np.sctypes.items()
-                      for nptype in nptypes if type_cat != 'others']
+SIMPLE_NUMPY_TYPES = [
+    nptype
+    for type_cat, nptypes in np.sctypes.items()
+    for nptype in nptypes
+    if type_cat != "others"
+]
 SIMPLE_TYPES = tuple([bool, int, float, str] + SIMPLE_NUMPY_TYPES)
 
 ## Variable to support a hack to add ONNX to runs without modifying openml-python
 last_models = None
 sample_input = None
-
-
 
 
 class PytorchExtension(Extension):
@@ -78,7 +73,7 @@ class PytorchExtension(Extension):
     # General setup
 
     @classmethod
-    def can_handle_flow(cls, flow: 'OpenMLFlow') -> bool:
+    def can_handle_flow(cls, flow: "OpenMLFlow") -> bool:
         """Check whether a given describes a Pytorch estimator.
 
         This is done by parsing the ``external_version`` field.
@@ -106,17 +101,18 @@ class PytorchExtension(Extension):
         bool
         """
         from torch.nn import Module
+
         return isinstance(model, Module)
-    
+
     ################################################################################################
-    # Method for dataloader 
-    
-    
- 
+    # Method for dataloader
+
     ################################################################################################
     # Methods for flow serialization and de-serialization
 
-    def flow_to_model(self, flow: 'OpenMLFlow', initialize_with_defaults: bool = False) -> Any:
+    def flow_to_model(
+        self, flow: "OpenMLFlow", initialize_with_defaults: bool = False
+    ) -> Any:
         """Initializes a Pytorch model based on a flow.
 
         Parameters
@@ -133,7 +129,9 @@ class PytorchExtension(Extension):
         -------
         mixed
         """
-        return self._deserialize_pytorch(flow, initialize_with_defaults=initialize_with_defaults)
+        return self._deserialize_pytorch(
+            flow, initialize_with_defaults=initialize_with_defaults
+        )
 
     def _deserialize_pytorch(
         self,
@@ -169,9 +167,11 @@ class PytorchExtension(Extension):
         mixed
         """
 
-        logging.info('-%s flow_to_pytorch START o=%s, components=%s, '
-                     'init_defaults=%s' % ('-' * recursion_depth, o, components,
-                                           initialize_with_defaults))
+        logging.info(
+            "-%s flow_to_pytorch START o=%s, components=%s, "
+            "init_defaults=%s"
+            % ("-" * recursion_depth, o, components, initialize_with_defaults)
+        )
         depth_pp = recursion_depth + 1  # shortcut var, depth plus plus
 
         # First, we need to check whether the presented object is a json string.
@@ -189,26 +189,26 @@ class PytorchExtension(Extension):
             # Check if the dict encodes a 'special' object, which could not
             # easily converted into a string, but rather the information to
             # re-create the object were stored in a dictionary.
-            if 'oml-python:serialized_object' in o:
-                serialized_type = o['oml-python:serialized_object']
-                value = o['value']
-                if serialized_type == 'type':
+            if "oml-python:serialized_object" in o:
+                serialized_type = o["oml-python:serialized_object"]
+                value = o["value"]
+                if serialized_type == "type":
                     rval = self._deserialize_type(value)
-                elif serialized_type == 'function':
+                elif serialized_type == "function":
                     rval = self._deserialize_function(value)
-                elif serialized_type == 'methoddescriptor':
+                elif serialized_type == "methoddescriptor":
                     rval = self._deserialize_methoddescriptor(value)
-                elif serialized_type == 'component_reference':
+                elif serialized_type == "component_reference":
                     assert components is not None  # Necessary for mypy
                     value = self._deserialize_pytorch(value, recursion_depth=depth_pp)
-                    step_name = value['step_name']
-                    key = value['key']
+                    step_name = value["step_name"]
+                    key = value["key"]
                     if key not in components:
                         key = str(key)
                     component = self._deserialize_pytorch(
                         components[key],
                         initialize_with_defaults=initialize_with_defaults,
-                        recursion_depth=depth_pp
+                        recursion_depth=depth_pp,
                     )
                     # The component is now added to where it should be used
                     # later. It should not be passed to the constructor of the
@@ -216,12 +216,12 @@ class PytorchExtension(Extension):
                     del components[key]
                     if step_name is None:
                         rval = component
-                    elif 'argument_1' not in value:
+                    elif "argument_1" not in value:
                         rval = (step_name, component)
                     else:
-                        rval = (step_name, component, value['argument_1'])
+                        rval = (step_name, component, value["argument_1"])
                 else:
-                    raise ValueError('Cannot flow_to_pytorch %s' % serialized_type)
+                    raise ValueError("Cannot flow_to_pytorch %s" % serialized_type)
 
             else:
                 rval = OrderedDict(
@@ -237,7 +237,7 @@ class PytorchExtension(Extension):
                             components=components,
                             initialize_with_defaults=initialize_with_defaults,
                             recursion_depth=depth_pp,
-                        )
+                        ),
                     )
                     for key, value in sorted(o.items())
                 )
@@ -257,7 +257,7 @@ class PytorchExtension(Extension):
             rval = o
         elif isinstance(o, OpenMLFlow):
             if not self._is_pytorch_flow(o):
-                raise ValueError('Only pytorch flows can be reinstantiated')
+                raise ValueError("Only pytorch flows can be reinstantiated")
             rval = self._deserialize_model(
                 flow=o,
                 keep_defaults=initialize_with_defaults,
@@ -265,11 +265,14 @@ class PytorchExtension(Extension):
             )
         else:
             raise TypeError(o)
-        logging.info('-%s flow_to_pytorch END   o=%s, rval=%s'
-                     % ('-' * recursion_depth, o, rval))
+        logging.info(
+            "-%s flow_to_pytorch END   o=%s, rval=%s" % ("-" * recursion_depth, o, rval)
+        )
         return rval
 
-    def model_to_flow(self, model: Any, custom_name: Optional[str] = None) -> 'OpenMLFlow':
+    def model_to_flow(
+        self, model: Any, custom_name: Optional[str] = None
+    ) -> "OpenMLFlow":
         """Transform a Pytorch model to a flow for uploading it to OpenML.
 
         Parameters
@@ -283,7 +286,12 @@ class PytorchExtension(Extension):
         # Necessary to make pypy not complain about all the different possible return types
         return self._serialize_pytorch(model, custom_name)
 
-    def _serialize_pytorch(self, o: Any, parent_model: Optional[Any] = None, custom_name: Optional[str] = None) -> Any:
+    def _serialize_pytorch(
+        self,
+        o: Any,
+        parent_model: Optional[Any] = None,
+        custom_name: Optional[str] = None,
+    ) -> Any:
         rval = None  # type: Any
         if self.is_estimator(o):
             # is the main model or a submodel
@@ -304,9 +312,10 @@ class PytorchExtension(Extension):
             rval = OrderedDict()
             for key, value in o.items():
                 if not isinstance(key, str):
-                    raise TypeError('Can only use string as keys, you passed '
-                                    'type %s for value %s.' %
-                                    (type(key), str(key)))
+                    raise TypeError(
+                        "Can only use string as keys, you passed "
+                        "type %s for value %s." % (type(key), str(key))
+                    )
                 key = self._serialize_pytorch(key, parent_model)
                 value = self._serialize_pytorch(value, parent_model)
                 rval[key] = value
@@ -336,16 +345,17 @@ class PytorchExtension(Extension):
 
         # This can possibly be done by a package such as pyxb, but I could not get
         # it to work properly.
-        import scipy
         import numpy
+        import scipy
 
         major, minor, micro, _, _ = sys.version_info
-        python_version = 'Python_{}.'.format(
-            ".".join([str(major), str(minor), str(micro)]))
-        pytorch_version = 'Torch_{}.'.format(torch.__version__)
-        numpy_version = 'NumPy_{}.'.format(numpy.__version__)
-        scipy_version = 'SciPy_{}.'.format(scipy.__version__)
-        pytorch_version_formatted = pytorch_version.replace('+','_')
+        python_version = "Python_{}.".format(
+            ".".join([str(major), str(minor), str(micro)])
+        )
+        pytorch_version = "Torch_{}.".format(torch.__version__)
+        numpy_version = "NumPy_{}.".format(numpy.__version__)
+        scipy_version = "SciPy_{}.".format(scipy.__version__)
+        pytorch_version_formatted = pytorch_version.replace("+", "_")
         return [python_version, pytorch_version_formatted, numpy_version, scipy_version]
 
     def create_setup_string(self, model: Any) -> str:
@@ -365,11 +375,13 @@ class PytorchExtension(Extension):
     @classmethod
     def _is_pytorch_flow(cls, flow: OpenMLFlow) -> bool:
         return (
-            flow.external_version.startswith('torch==')
-            or ',torch==' in flow.external_version
+            flow.external_version.startswith("torch==")
+            or ",torch==" in flow.external_version
         )
 
-    def _serialize_model(self, model: Any, custom_name: Optional[str] = None) -> OpenMLFlow:
+    def _serialize_model(
+        self, model: Any, custom_name: Optional[str] = None
+    ) -> OpenMLFlow:
         """Create an OpenMLFlow.
 
         Calls `pytorch_to_flow` recursively to properly serialize the
@@ -384,55 +396,59 @@ class PytorchExtension(Extension):
         OpenMLFlow
 
         """
-        
+
         # Get all necessary information about the model objects itself
-        parameters, parameters_meta_info, subcomponents, subcomponents_explicit = \
+        parameters, parameters_meta_info, subcomponents, subcomponents_explicit = (
             self._extract_information_from_model(model)
+        )
 
         # Check that a component does not occur multiple times in a flow as this
         # is not supported by OpenML
         self._check_multiple_occurence_of_component_in_flow(model, subcomponents)
 
-        import zlib
         import os
+        import zlib
 
         # class_name = model.__module__ + "." + model.__class__.__name__
-        class_name = 'torch.nn' + "." + model.__class__.__name__
-        class_name += '.'
-        class_name += format(zlib.crc32(bytearray(os.urandom(32))), 'x')
-        class_name += format(zlib.crc32(bytearray(os.urandom(32))), 'x')
+        class_name = "torch.nn" + "." + model.__class__.__name__
+        class_name += "."
+        class_name += format(zlib.crc32(bytearray(os.urandom(32))), "x")
+        class_name += format(zlib.crc32(bytearray(os.urandom(32))), "x")
 
         name = class_name
 
         # Get the external versions of all sub-components
         external_version = self._get_external_version_string(model, subcomponents)
 
-        dependencies = '\n'.join([
-            self._format_external_version(
-                'torch',
-                torch.__version__,
-            ),
-            'numpy>=1.6.1',
-            'scipy>=0.9',
-        ])
+        dependencies = "\n".join(
+            [
+                self._format_external_version(
+                    "torch",
+                    torch.__version__,
+                ),
+                "numpy>=1.6.1",
+                "scipy>=0.9",
+            ]
+        )
 
-        torch_version = self._format_external_version('torch', torch.__version__)
-        torch_version_formatted = torch_version.replace('==', '_')
-        torch_version_formatted = torch_version_formatted.replace('+', '_')
+        torch_version = self._format_external_version("torch", torch.__version__)
+        torch_version_formatted = torch_version.replace("==", "_")
+        torch_version_formatted = torch_version_formatted.replace("+", "_")
 
-        flow = OpenMLFlow(name=name,
-                          class_name=class_name,
-                          description='Automatically created pytorch flow.',
-                          model=model,
-                          components=subcomponents,
-                          parameters=parameters,
-                          parameters_meta_info=parameters_meta_info,
-                          external_version=external_version,
-                          tags=['openml-python', 'pytorch',
-                                'python', torch_version_formatted],
-                          language='English',
-                          dependencies=dependencies, 
-                          custom_name=custom_name)
+        flow = OpenMLFlow(
+            name=name,
+            class_name=class_name,
+            description="Automatically created pytorch flow.",
+            model=model,
+            components=subcomponents,
+            parameters=parameters,
+            parameters_meta_info=parameters_meta_info,
+            external_version=external_version,
+            tags=["openml-python", "pytorch", "python", torch_version_formatted],
+            language="English",
+            dependencies=dependencies,
+            custom_name=custom_name,
+        )
 
         return flow
 
@@ -446,22 +462,23 @@ class PytorchExtension(Extension):
         # version of all subcomponents, which themselves already contain all
         # requirements for their subcomponents. The external version string is a
         # sorted concatenation of all modules which are present in this run.
-        model_package_name = model.__module__.split('.')[0]
+        model_package_name = model.__module__.split(".")[0]
         module = importlib.import_module(model_package_name)
-        model_package_version_number = 'module.__version__'  # type: ignore
+        model_package_version_number = "module.__version__"  # type: ignore
         external_version = self._format_external_version(
-            model_package_name, model_package_version_number,
+            model_package_name,
+            model_package_version_number,
         )
-        openml_version = self._format_external_version('openml', openml.__version__)
-        torch_version = self._format_external_version('torch', torch.__version__)
+        openml_version = self._format_external_version("openml", openml.__version__)
+        torch_version = self._format_external_version("torch", torch.__version__)
         external_versions = set()
         external_versions.add(external_version)
         external_versions.add(openml_version)
         external_versions.add(torch_version)
         for visitee in sub_components.values():
-            for external_version in visitee.external_version.split(','):
+            for external_version in visitee.external_version.split(","):
                 external_versions.add(external_version)
-        return ','.join(list(sorted(external_versions)))
+        return ",".join(list(sorted(external_versions)))
 
     def _check_multiple_occurence_of_component_in_flow(
         self,
@@ -474,26 +491,30 @@ class PytorchExtension(Extension):
         while len(to_visit_stack) > 0:
             visitee = to_visit_stack.pop()
             if visitee.name in known_sub_components:
-                raise ValueError('Found a second occurence of component %s when '
-                                 'trying to serialize %s.' % (visitee.name, model))
+                raise ValueError(
+                    "Found a second occurence of component %s when "
+                    "trying to serialize %s." % (visitee.name, model)
+                )
             else:
                 known_sub_components.add(visitee.name)
                 to_visit_stack.extend(visitee.components.values())
 
     def _is_container_module(self, module: torch.nn.Module) -> bool:
-        if isinstance(module,
-                      (torch.nn.Sequential,
-                       torch.nn.ModuleDict,
-                       torch.nn.ModuleList)):
+        if isinstance(
+            module, (torch.nn.Sequential, torch.nn.ModuleDict, torch.nn.ModuleList)
+        ):
             return True
-        if module in (torch.nn.modules.container.Sequential,
-                      torch.nn.modules.container.ModuleDict,
-                      torch.nn.modules.container.ModuleList):
+        if module in (
+            torch.nn.modules.container.Sequential,
+            torch.nn.modules.container.ModuleDict,
+            torch.nn.modules.container.ModuleList,
+        ):
             return True
         return False
 
-    def _get_module_hyperparameters(self, module: torch.nn.Module,
-                                    parameters: Dict[str, torch.nn.Parameter]) -> Dict[str, Any]:
+    def _get_module_hyperparameters(
+        self, module: torch.nn.Module, parameters: Dict[str, torch.nn.Parameter]
+    ) -> Dict[str, Any]:
         # Extract the signature of the module constructor
         main_signature = inspect.signature(module.__init__)
         params = dict()  # type: Dict[str, Any]
@@ -505,8 +526,10 @@ class PytorchExtension(Extension):
                 continue
 
             # Skip *args and **kwargs, and check the base classes instead.
-            if param.kind in (inspect.Parameter.VAR_POSITIONAL,
-                              inspect.Parameter.VAR_KEYWORD):
+            if param.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
                 check_bases = True
                 continue
 
@@ -525,8 +548,10 @@ class PytorchExtension(Extension):
                         continue
 
                     # Skip *args and **kwargs since they are not relevant.
-                    if param.kind in (inspect.Parameter.VAR_POSITIONAL,
-                                      inspect.Parameter.VAR_KEYWORD):
+                    if param.kind in (
+                        inspect.Parameter.VAR_POSITIONAL,
+                        inspect.Parameter.VAR_KEYWORD,
+                    ):
                         continue
 
                     # Extract the hyperparameter from the module.
@@ -534,27 +559,30 @@ class PytorchExtension(Extension):
                         params[param_name] = getattr(module, param_name)
 
         from .layers import Functional
+
         if isinstance(module, Functional):
-            params['args'] = getattr(module, 'args')
-            params['kwargs'] = getattr(module, 'kwargs')
-        
+            params["args"] = getattr(module, "args")
+            params["kwargs"] = getattr(module, "kwargs")
+
         return params
 
-    def _get_module_descriptors(self, model: torch.nn.Module, deep=True) -> Dict[str, Any]:
+    def _get_module_descriptors(
+        self, model: torch.nn.Module, deep=True
+    ) -> Dict[str, Any]:
         # The named children (modules) of the given module.
         named_children = list((k, v) for (k, v) in model.named_children())
         # The parameters of the given module and its submodules.
         model_parameters = dict((k, v) for (k, v) in model.named_parameters())
 
         parameters = dict()  # type: Dict[str, Any]
-        
+
         if not self._is_container_module(model):
             # For non-containers, we simply extract the hyperparameters.
             parameters = self._get_module_hyperparameters(model, model_parameters)
         else:
             # Otherwise we serialize their children as lists of pairs in order
             # to maintain the order of the sub modules.
-            parameters['children'] = named_children
+            parameters["children"] = named_children
 
         # If a deep description is required, append the children to the dictionary of
         # returned parameters.
@@ -568,9 +596,9 @@ class PytorchExtension(Extension):
         self,
         model: Any,
     ) -> Tuple[
-        'OrderedDict[str, Optional[str]]',
-        'OrderedDict[str, Optional[Dict]]',
-        'OrderedDict[str, OpenMLFlow]',
+        "OrderedDict[str, Optional[str]]",
+        "OrderedDict[str, Optional[Dict]]",
+        "OrderedDict[str, OpenMLFlow]",
         Set,
     ]:
         # This function contains four "global" states and is quite long and
@@ -585,13 +613,13 @@ class PytorchExtension(Extension):
         sub_components_explicit = set()
         parameters = OrderedDict()  # type: OrderedDict[str, Optional[str]]
         parameters_meta_info = OrderedDict()  # type: OrderedDict[str, Optional[Dict]]
-        
+
         model_parameters = self._get_module_descriptors(model, deep=True)
         for k, v in sorted(model_parameters.items(), key=lambda t: t[0]):
             rval = self._serialize_pytorch(v, model)
 
             def flatten_all(list_):
-                """ Flattens arbitrary depth lists of lists (e.g. [[1,2],[3,[1]]] -> [1,2,3,1]). """
+                """Flattens arbitrary depth lists of lists (e.g. [[1,2],[3,[1]]] -> [1,2,3,1])."""
                 for el in list_:
                     if isinstance(el, (list, tuple)):
                         yield from flatten_all(el)
@@ -611,31 +639,40 @@ class PytorchExtension(Extension):
                 and all([isinstance(el, SIMPLE_TYPES) for el in flatten_all(rval)])
             )
 
-            if is_non_empty_list_of_lists_with_same_type and not nested_list_of_simple_types:
+            if (
+                is_non_empty_list_of_lists_with_same_type
+                and not nested_list_of_simple_types
+            ):
                 # If a list of lists is identified that include 'non-simple' types (e.g. objects),
                 # we assume they are steps in a pipeline, feature union, or base classifiers in
                 # a voting classifier.
                 parameter_value = list()  # type: List
-                reserved_keywords = set(self._get_module_descriptors(model, deep=False).keys())
+                reserved_keywords = set(
+                    self._get_module_descriptors(model, deep=False).keys()
+                )
 
                 for sub_component_tuple in rval:
                     identifier = sub_component_tuple[0]
                     sub_component = sub_component_tuple[1]
                     sub_component_type = type(sub_component_tuple)
                     if not 2 <= len(sub_component_tuple) <= 3:
-                        msg = 'Length of tuple does not match assumptions'
+                        msg = "Length of tuple does not match assumptions"
                         raise ValueError(msg)
                     if not isinstance(sub_component, (OpenMLFlow, type(None))):
-                        msg = 'Second item of tuple does not match assumptions. ' \
-                              'Expected OpenMLFlow, got %s' % type(sub_component)
+                        msg = (
+                            "Second item of tuple does not match assumptions. "
+                            "Expected OpenMLFlow, got %s" % type(sub_component)
+                        )
                         raise TypeError(msg)
 
                     if identifier in reserved_keywords:
-                        parent_model = "{}.{}".format(model.__module__,
-                                                      model.__class__.__name__)
-                        msg = 'Found element shadowing official ' \
-                              'parameter for %s: %s' % (parent_model,
-                                                        identifier)
+                        parent_model = "{}.{}".format(
+                            model.__module__, model.__class__.__name__
+                        )
+                        msg = (
+                            "Found element shadowing official "
+                            "parameter for %s: %s" % (parent_model, identifier)
+                        )
                         raise PyOpenMLError(msg)
 
                     if sub_component is None:
@@ -654,21 +691,25 @@ class PytorchExtension(Extension):
                         # when deserializing the parameter
                         sub_components_explicit.add(identifier)
                         sub_components[identifier] = sub_component
-                        component_reference = OrderedDict()  # type: Dict[str, Union[str, Dict]]
-                        component_reference['oml-python:serialized_object'] = 'component_reference'
+                        component_reference = (
+                            OrderedDict()
+                        )  # type: Dict[str, Union[str, Dict]]
+                        component_reference["oml-python:serialized_object"] = (
+                            "component_reference"
+                        )
                         cr_value = OrderedDict()  # type: Dict[str, Any]
-                        cr_value['key'] = identifier
-                        cr_value['step_name'] = identifier
+                        cr_value["key"] = identifier
+                        cr_value["step_name"] = identifier
                         if len(sub_component_tuple) == 3:
-                            cr_value['argument_1'] = sub_component_tuple[2]
-                        component_reference['value'] = cr_value
+                            cr_value["argument_1"] = sub_component_tuple[2]
+                        component_reference["value"] = cr_value
                         parameter_value.append(component_reference)
 
                 # Here (and in the elif and else branch below) are the only
                 # places where we encode a value as json to make sure that all
                 # parameter values still have the same type after
                 # deserialization
-                
+
                 if isinstance(rval, tuple):
                     parameter_json = json.dumps(tuple(parameter_value))
                 else:
@@ -681,11 +722,13 @@ class PytorchExtension(Extension):
                 sub_components[k] = rval
                 sub_components_explicit.add(k)
                 component_reference = OrderedDict()
-                component_reference['oml-python:serialized_object'] = 'component_reference'
+                component_reference["oml-python:serialized_object"] = (
+                    "component_reference"
+                )
                 cr_value = OrderedDict()
-                cr_value['key'] = k
-                cr_value['step_name'] = None
-                component_reference['value'] = cr_value
+                cr_value["key"] = k
+                cr_value["step_name"] = None
+                component_reference["value"] = cr_value
                 cr = self._serialize_pytorch(component_reference, model)
                 parameters[k] = json.dumps(cr)
 
@@ -694,7 +737,9 @@ class PytorchExtension(Extension):
                 rval = json.dumps(rval)
                 parameters[k] = rval
 
-            parameters_meta_info[k] = OrderedDict((('description', None), ('data_type', None)))
+            parameters_meta_info[k] = OrderedDict(
+                (("description", None), ("data_type", None))
+            )
 
         return parameters, parameters_meta_info, sub_components, sub_components_explicit
 
@@ -719,7 +764,9 @@ class PytorchExtension(Extension):
         # parameters with defaults are optional, all others are required.
         signature = inspect.getfullargspec(fn_name)
         if signature.defaults:
-            optional_params = dict(zip(reversed(signature.args), reversed(signature.defaults)))
+            optional_params = dict(
+                zip(reversed(signature.args), reversed(signature.defaults))
+            )
         else:
             optional_params = dict()
         required_params = {arg for arg in signature.args if arg not in optional_params}
@@ -731,7 +778,7 @@ class PytorchExtension(Extension):
         keep_defaults: bool,
         recursion_depth: int,
     ) -> Any:
-        logging.info('-%s deserialize %s' % ('-' * recursion_depth, flow.name))
+        logging.info("-%s deserialize %s" % ("-" * recursion_depth, flow.name))
         model_name = flow.class_name
         self._check_dependencies(flow.dependencies)
 
@@ -748,8 +795,10 @@ class PytorchExtension(Extension):
 
         for name in parameters:
             value = parameters.get(name)
-            logging.info('--%s flow_parameter=%s, value=%s' %
-                         ('-' * recursion_depth, name, value))
+            logging.info(
+                "--%s flow_parameter=%s, value=%s"
+                % ("-" * recursion_depth, name, value)
+            )
             rval = self._deserialize_pytorch(
                 value,
                 components=components_,
@@ -764,8 +813,10 @@ class PytorchExtension(Extension):
             if name not in components_:
                 continue
             value = components[name]
-            logging.info('--%s flow_component=%s, value=%s'
-                         % ('-' * recursion_depth, name, value))
+            logging.info(
+                "--%s flow_component=%s, value=%s"
+                % ("-" * recursion_depth, name, value)
+            )
             rval = self._deserialize_pytorch(
                 value,
                 recursion_depth=recursion_depth + 1,
@@ -773,16 +824,16 @@ class PytorchExtension(Extension):
             parameter_dict[name] = rval
 
         # Remove the unique identifier
-        model_name = model_name.rsplit('.', 1)[0]
+        model_name = model_name.rsplit(".", 1)[0]
 
-        module_name = model_name.rsplit('.', 1)
-        model_class = getattr(importlib.import_module(module_name[0]),
-                              module_name[1])
+        module_name = model_name.rsplit(".", 1)
+        model_class = getattr(importlib.import_module(module_name[0]), module_name[1])
 
         if keep_defaults:
             # obtain all params with a default
-            param_defaults, _ = \
-                self._get_fn_arguments_with_defaults(model_class.__init__)
+            param_defaults, _ = self._get_fn_arguments_with_defaults(
+                model_class.__init__
+            )
 
             # delete the params that have a default from the dict,
             # so they get initialized with their default value
@@ -797,16 +848,19 @@ class PytorchExtension(Extension):
                     del parameter_dict[param]
 
         if self._is_container_module(model_class):
-            children = parameter_dict['children']
+            children = parameter_dict["children"]
             children = list((str(k), v) for (k, v) in children)
             children = OrderedDict(children)
             return model_class(children)
 
         from .layers import Functional
+
         if model_class is Functional:
-            return model_class(function=parameter_dict['function'],
-                               *parameter_dict['args'],
-                               **parameter_dict['kwargs'])
+            return model_class(
+                function=parameter_dict["function"],
+                *parameter_dict["args"],
+                **parameter_dict["kwargs"]
+            )
 
         return model_class(**parameter_dict)
 
@@ -814,82 +868,91 @@ class PytorchExtension(Extension):
         if not dependencies:
             return
 
-        dependencies_list = dependencies.split('\n')
+        dependencies_list = dependencies.split("\n")
         for dependency_string in dependencies_list:
             match = DEPENDENCIES_PATTERN.match(dependency_string)
             if not match:
-                raise ValueError('Cannot parse dependency %s' % dependency_string)
+                raise ValueError("Cannot parse dependency %s" % dependency_string)
 
-            dependency_name = match.group('name')
-            operation = match.group('operation')
-            version = match.group('version')
+            dependency_name = match.group("name")
+            operation = match.group("operation")
+            version = match.group("version")
 
             module = importlib.import_module(dependency_name)
             required_version = LooseVersion(version)
             installed_version = LooseVersion(module.__version__)  # type: ignore
 
-            if operation == '==':
+            if operation == "==":
                 check = required_version == installed_version
-            elif operation == '>':
+            elif operation == ">":
                 check = installed_version > required_version
-            elif operation == '>=':
-                check = (installed_version > required_version
-                         or installed_version == required_version)
+            elif operation == ">=":
+                check = (
+                    installed_version > required_version
+                    or installed_version == required_version
+                )
             else:
-                raise NotImplementedError(
-                    'operation \'%s\' is not supported' % operation)
+                raise NotImplementedError("operation '%s' is not supported" % operation)
             if not check:
-                raise ValueError('Trying to deserialize a model with dependency '
-                                 '%s not satisfied.' % dependency_string)
+                raise ValueError(
+                    "Trying to deserialize a model with dependency "
+                    "%s not satisfied." % dependency_string
+                )
 
-    def _serialize_type(self, o: Any) -> 'OrderedDict[str, str]':
-        mapping = {float: 'float',
-                   np.float: 'np.float',
-                   np.float32: 'np.float32',
-                   np.float64: 'np.float64',
-                   int: 'int',
-                   np.int: 'np.int',
-                   np.int32: 'np.int32',
-                   np.int64: 'np.int64'}
+    def _serialize_type(self, o: Any) -> "OrderedDict[str, str]":
+        mapping = {
+            float: "float",
+            np.float: "np.float",
+            np.float32: "np.float32",
+            np.float64: "np.float64",
+            int: "int",
+            np.int: "np.int",
+            np.int32: "np.int32",
+            np.int64: "np.int64",
+        }
         ret = OrderedDict()  # type: 'OrderedDict[str, str]'
-        ret['oml-python:serialized_object'] = 'type'
-        ret['value'] = mapping[o]
+        ret["oml-python:serialized_object"] = "type"
+        ret["value"] = mapping[o]
         return ret
 
     def _deserialize_type(self, o: str) -> Any:
-        mapping = {'float': float,
-                   'np.float': np.float,
-                   'np.float32': np.float32,
-                   'np.float64': np.float64,
-                   'int': int,
-                   'np.int': np.int,
-                   'np.int32': np.int32,
-                   'np.int64': np.int64}
+        mapping = {
+            "float": float,
+            "np.float": np.float,
+            "np.float32": np.float32,
+            "np.float64": np.float64,
+            "int": int,
+            "np.int": np.int,
+            "np.int32": np.int32,
+            "np.int64": np.int64,
+        }
         return mapping[o]
 
-    def _serialize_function(self, o: Callable) -> 'OrderedDict[str, str]':
-        name = o.__module__ + '.' + o.__name__
+    def _serialize_function(self, o: Callable) -> "OrderedDict[str, str]":
+        name = o.__module__ + "." + o.__name__
         ret = OrderedDict()  # type: 'OrderedDict[str, str]'
-        ret['oml-python:serialized_object'] = 'function'
-        ret['value'] = name
+        ret["oml-python:serialized_object"] = "function"
+        ret["value"] = name
         return ret
 
     def _deserialize_function(self, name: str) -> Callable:
-        module_name = name.rsplit('.', 1)
-        function_handle = getattr(importlib.import_module(module_name[0]), module_name[1])
+        module_name = name.rsplit(".", 1)
+        function_handle = getattr(
+            importlib.import_module(module_name[0]), module_name[1]
+        )
         return function_handle
 
-    def _serialize_methoddescriptor(self, o: Any) -> 'OrderedDict[str, str]':
-        name = o.__objclass__.__module__ \
-            + '.' + o.__objclass__.__name__ \
-            + '.' + o.__name__
+    def _serialize_methoddescriptor(self, o: Any) -> "OrderedDict[str, str]":
+        name = (
+            o.__objclass__.__module__ + "." + o.__objclass__.__name__ + "." + o.__name__
+        )
         ret = OrderedDict()  # type: 'OrderedDict[str, str]'
-        ret['oml-python:serialized_object'] = 'methoddescriptor'
-        ret['value'] = name
+        ret["oml-python:serialized_object"] = "methoddescriptor"
+        ret["value"] = name
         return ret
 
     def _deserialize_methoddescriptor(self, name: str) -> Any:
-        module_name = name.rsplit('.', 2)
+        module_name = name.rsplit(".", 2)
         object_handle = getattr(importlib.import_module(module_name[0]), module_name[1])
         function_handle = getattr(object_handle, module_name[2])
         return function_handle
@@ -899,11 +962,12 @@ class PytorchExtension(Extension):
         model_package_name: str,
         model_package_version_number: str,
     ) -> str:
-        return '%s==%s' % (model_package_name, model_package_version_number)
+        return "%s==%s" % (model_package_name, model_package_version_number)
 
     @staticmethod
-    def _get_parameter_values_recursive(param_grid: Union[Dict, List[Dict]],
-                                        parameter_name: str) -> List[Any]:
+    def _get_parameter_values_recursive(
+        param_grid: Union[Dict, List[Dict]], parameter_name: str
+    ) -> List[Any]:
         """
         Returns a list of values for a given hyperparameter, encountered
         recursively throughout the flow. (e.g., n_jobs can be defined
@@ -926,17 +990,20 @@ class PytorchExtension(Extension):
         if isinstance(param_grid, dict):
             result = list()
             for param, value in param_grid.items():
-                if param.split('__')[-1] == parameter_name:
+                if param.split("__")[-1] == parameter_name:
                     result.append(value)
             return result
         elif isinstance(param_grid, list):
             result = list()
             for sub_grid in param_grid:
-                result.extend(PytorchExtension._get_parameter_values_recursive(sub_grid,
-                                                                               parameter_name))
+                result.extend(
+                    PytorchExtension._get_parameter_values_recursive(
+                        sub_grid, parameter_name
+                    )
+                )
             return result
         else:
-            raise ValueError('Param_grid should either be a dict or list of dicts')
+            raise ValueError("Param_grid should either be a dict or list of dicts")
 
     ################################################################################################
     # Methods for performing runs with extension modules
@@ -981,11 +1048,11 @@ class PytorchExtension(Extension):
         """
 
         return model
-    
+
     def _run_model_on_fold(
         self,
         model: Any,
-        task: 'OpenMLTask',
+        task: "OpenMLTask",
         X_train: Union[np.ndarray, scipy.sparse.spmatrix, pd.DataFrame],
         rep_no: int,
         fold_no: int,
@@ -994,9 +1061,9 @@ class PytorchExtension(Extension):
     ) -> Tuple[
         np.ndarray,
         np.ndarray,
-        'OrderedDict[str, float]',
+        "OrderedDict[str, float]",
         Optional[OpenMLRunTrace],
-        Optional[Any]
+        Optional[Any],
     ]:
         """Run a model on a repeat,fold,subsample triplet of the task and return prediction
         information.
@@ -1044,17 +1111,18 @@ class PytorchExtension(Extension):
         """
 
         try:
-            trainer:OpenMLTrainerModule = config.trainer
+            trainer: OpenMLTrainerModule = config.trainer
             trainer.logger = config.logger
         except AttributeError:
-            raise ValueError('Trainer not set to config. Please use openml_pytorch.config.trainer = trainer to set the trainer.')
-        return trainer.run_model_on_fold(model, task, X_train, rep_no, fold_no, y_train, X_test)
-    
+            raise ValueError(
+                "Trainer not set to config. Please use openml_pytorch.config.trainer = trainer to set the trainer."
+            )
+        return trainer.run_model_on_fold(
+            model, task, X_train, rep_no, fold_no, y_train, X_test
+        )
 
     def compile_additional_information(
-            self,
-            task: 'OpenMLTask',
-            additional_information: List[Tuple[int, int, Any]]
+        self, task: "OpenMLTask", additional_information: List[Tuple[int, int, Any]]
     ) -> Dict[str, Tuple[str, str]]:
         """Compiles additional information provided by the extension during the runs into a final
         set of files.
@@ -1075,7 +1143,7 @@ class PytorchExtension(Extension):
 
     def obtain_parameter_values(
         self,
-        flow: 'OpenMLFlow',
+        flow: "OpenMLFlow",
         model: Any = None,
     ) -> List[Dict[str, Any]]:
         """Extracts all parameter settings required for the flow from the model.
@@ -1108,8 +1176,9 @@ class PytorchExtension(Extension):
                 flow_map.update(get_flow_dict(_flow.components[subflow]))
             return flow_map
 
-        def extract_parameters(_flow, _flow_dict, component_model,
-                               _main_call=False, main_id=None):
+        def extract_parameters(
+            _flow, _flow_dict, component_model, _main_call=False, main_id=None
+        ):
             def is_subcomponent_specification(values):
                 # checks whether the current value can be a specification of
                 # subcomponents, as for example the value for steps parameter
@@ -1133,24 +1202,31 @@ class PytorchExtension(Extension):
             # not have to rely on _flow_dict
             exp_parameters = set(_flow.parameters)
             exp_components = set(_flow.components)
-            model_parameters = set([mp for mp in self._get_module_descriptors(component_model)
-                                    if '__' not in mp])
+            model_parameters = set(
+                [
+                    mp
+                    for mp in self._get_module_descriptors(component_model)
+                    if "__" not in mp
+                ]
+            )
             if len((exp_parameters | exp_components) ^ model_parameters) != 0:
                 flow_params = sorted(exp_parameters | exp_components)
                 model_params = sorted(model_parameters)
-                raise ValueError('Parameters of the model do not match the '
-                                 'parameters expected by the '
-                                 'flow:\nexpected flow parameters: '
-                                 '%s\nmodel parameters: %s' % (flow_params,
-                                                               model_params))
+                raise ValueError(
+                    "Parameters of the model do not match the "
+                    "parameters expected by the "
+                    "flow:\nexpected flow parameters: "
+                    "%s\nmodel parameters: %s" % (flow_params, model_params)
+                )
 
             _params = []
             for _param_name in _flow.parameters:
                 _current = OrderedDict()
-                _current['oml:name'] = _param_name
+                _current["oml:name"] = _param_name
 
                 current_param_values = self.model_to_flow(
-                    self._get_module_descriptors(component_model)[_param_name])
+                    self._get_module_descriptors(component_model)[_param_name]
+                )
 
                 # Try to filter out components (a.k.a. subflows) which are
                 # handled further down in the code (by recursively calling
@@ -1163,47 +1239,54 @@ class PytorchExtension(Extension):
                     parsed_values = list()
                     for subcomponent in current_param_values:
                         if len(subcomponent) < 2 or len(subcomponent) > 3:
-                            raise ValueError('Component reference should be '
-                                             'size {2,3}. ')
+                            raise ValueError(
+                                "Component reference should be " "size {2,3}. "
+                            )
 
                         subcomponent_identifier = subcomponent[0]
                         subcomponent_flow = subcomponent[1]
                         if not isinstance(subcomponent_identifier, str):
-                            raise TypeError('Subcomponent identifier should be '
-                                            'string')
-                        if not isinstance(subcomponent_flow,
-                                          openml.flows.OpenMLFlow):
-                            raise TypeError('Subcomponent flow should be string')
+                            raise TypeError(
+                                "Subcomponent identifier should be " "string"
+                            )
+                        if not isinstance(subcomponent_flow, openml.flows.OpenMLFlow):
+                            raise TypeError("Subcomponent flow should be string")
 
                         current = {
                             "oml-python:serialized_object": "component_reference",
                             "value": {
                                 "key": subcomponent_identifier,
-                                "step_name": subcomponent_identifier
-                            }
+                                "step_name": subcomponent_identifier,
+                            },
                         }
                         if len(subcomponent) == 3:
                             if not isinstance(subcomponent[2], list):
-                                raise TypeError('Subcomponent argument should be'
-                                                'list')
-                            current['value']['argument_1'] = subcomponent[2]
+                                raise TypeError(
+                                    "Subcomponent argument should be" "list"
+                                )
+                            current["value"]["argument_1"] = subcomponent[2]
                         parsed_values.append(current)
                     parsed_values = json.dumps(parsed_values)
                 else:
                     # vanilla parameter value
                     parsed_values = json.dumps(current_param_values)
 
-                _current['oml:value'] = parsed_values
+                _current["oml:value"] = parsed_values
                 if _main_call:
-                    _current['oml:component'] = main_id
+                    _current["oml:component"] = main_id
                 else:
-                    _current['oml:component'] = _flow_dict[_flow.name]
+                    _current["oml:component"] = _flow_dict[_flow.name]
                 _params.append(_current)
 
             for _identifier in _flow.components:
-                subcomponent_model = self._get_module_descriptors(component_model)[_identifier]
-                _params.extend(extract_parameters(_flow.components[_identifier],
-                                                  _flow_dict, subcomponent_model))
+                subcomponent_model = self._get_module_descriptors(component_model)[
+                    _identifier
+                ]
+                _params.extend(
+                    extract_parameters(
+                        _flow.components[_identifier], _flow_dict, subcomponent_model
+                    )
+                )
             return _params
 
         flow_dict = get_flow_dict(flow)
@@ -1234,15 +1317,19 @@ class PytorchExtension(Extension):
             The name the parameter will have once used in pytorch
         """
         if not isinstance(openml_parameter, openml.setups.OpenMLParameter):
-            raise ValueError('openml_parameter should be an instance of OpenMLParameter')
+            raise ValueError(
+                "openml_parameter should be an instance of OpenMLParameter"
+            )
         if not isinstance(flow, OpenMLFlow):
-            raise ValueError('flow should be an instance of OpenMLFlow')
+            raise ValueError("flow should be an instance of OpenMLFlow")
 
-        flow_structure = flow.get_structure('name')
+        flow_structure = flow.get_structure("name")
         if openml_parameter.flow_name not in flow_structure:
-            raise ValueError('Obtained OpenMLParameter and OpenMLFlow do not correspond. ')
+            raise ValueError(
+                "Obtained OpenMLParameter and OpenMLFlow do not correspond. "
+            )
         name = openml_parameter.flow_name  # for PEP8
-        return '__'.join(flow_structure[name] + [openml_parameter.parameter_name])
+        return "__".join(flow_structure[name] + [openml_parameter.parameter_name])
 
     ################################################################################################
     # Methods for hyperparameter optimization
@@ -1268,7 +1355,6 @@ class PytorchExtension(Extension):
         """
 
         return model
-
 
     def check_if_model_fitted(self, model: Any) -> bool:
         """Returns True/False denoting if the model has already been fitted/trained

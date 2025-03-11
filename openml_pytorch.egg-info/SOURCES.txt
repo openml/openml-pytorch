@@ -3,9 +3,11 @@ README.md
 pyproject.toml
 setup.py
 openml_pytorch/__init__.py
+openml_pytorch/callbacks.py
 openml_pytorch/config.py
-openml_pytorch/data.py
+openml_pytorch/custom_datasets.py
 openml_pytorch/extension.py
+openml_pytorch/metrics.py
 openml_pytorch/trainer.py
 openml_pytorch.egg-info/PKG-INFO
 openml_pytorch.egg-info/SOURCES.txt

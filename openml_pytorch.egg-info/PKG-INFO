@@ -1,12 +1,12 @@
 Metadata-Version: 2.1
 Name: openml-pytorch
-Version: 0.0.6
+Version: 0.1.0
 Summary: Pytorch extension for Openml python API
 Home-page: http://openml.org/
 Author:  
 Author-email: 
-Maintainer: Taniya Das
-Maintainer-email: t.das@tue.nl
+Maintainer: Subhaditya Mukherjee
+Maintainer-email: s.mukherjee@tue.nl
 License: BSD 3-clause
 Project-URL: Documentation, https://openml.github.io/openml-pytorch/
 Project-URL: Source Code, https://github.com/openml/openml-pytorch
@@ -26,10 +26,28 @@ Classifier: Programming Language :: Python :: 3.7
 Requires-Python: >=3.5, <3.11
 Description-Content-Type: text/markdown
 License-File: LICENSE.md
+Requires-Dist: torchvision<0.20.0,>=0.19.0
+Requires-Dist: onnx<1.17.0,>=1.16.2
+Requires-Dist: openml<0.15.0,>=0.14.2
+Requires-Dist: numpy<2.0.0
+Requires-Dist: matplotlib<3.10.0,>=3.9.2
+Requires-Dist: tensorboard<2.18.0,>=2.17.1
+Requires-Dist: tab-transformer-pytorch<0.4.0,>=0.3.0
+Requires-Dist: transformers<4.45.0,>=4.44.2
+Requires-Dist: mkdocs-material<9.6.0,>=9.5.39
+Requires-Dist: mkdocs-autorefs<1.3.0,>=1.2.0
+Requires-Dist: mkdocs-redirects<1.3.0,>=1.2.1
+Requires-Dist: mkdocs-jupyter<0.26.0,>=0.25.0
+Requires-Dist: mkdocs-awesome-pages-plugin<3.0.0,>=2.9.3
+Requires-Dist: mkdocstrings<0.27.0,>=0.26.1
+Requires-Dist: mkdocstrings-python<1.12.0,>=1.11.1
+Requires-Dist: mknotebooks<0.9.0,>=0.8.0
 
 # Pytorch extension for OpenML python
 
-Pytorch extension for [openml-python API](https://github.com/openml/openml-python).
+Pytorch extension for [openml-python API](https://github.com/openml/openml-python). This library provides a simple way to run your Pytorch models on OpenML tasks. 
+
+For a more native experience, PyTorch itself provides OpenML integrations for some tasks. You can find more information [here](<Integrations of OpenML in PyTorch.md>).
 
 #### Installation Instructions:
 
@@ -37,26 +55,66 @@ Pytorch extension for [openml-python API](https://github.com/openml/openml-pytho
 
 PyPi link https://pypi.org/project/openml-pytorch/
 
+Set the API key for OpenML from the command line:
+```bash
+openml configure apikey <your API key>
+```
+
 #### Usage
 Import openML libraries
 ```python
-import openml
-import openml_pytorch
-import openml_pytorch.layers
+import torch.nn
+import torch.optim
+
 import openml_pytorch.config
+import openml
+import logging
+
+from openml_pytorch.trainer import OpenMLTrainerModule
+from openml_pytorch.trainer import OpenMLDataModule
+from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
+import torchvision
+from openml_pytorch.trainer import convert_to_rgb
 
 ```
-Create a torch model
+Create a pytorch model and get a task from openML
 ```python
-model = torch.nn.Sequential(
-    processing_net,
-    features_net,
-    results_net
-)
+model = torchvision.models.efficientnet_b0(num_classes=200)
+# Download the OpenML task for tiniest imagenet
+task = openml.tasks.get_task(362128)
 ```
-Download the task from openML and run the model on task.
+Download the task from openML and define Data and Trainer configuration
 ```python
-task = openml.tasks.get_task(3573)
+transform = Compose(
+    [
+        ToPILImage(),  # Convert tensor to PIL Image to ensure PIL Image operations can be applied.
+        Lambda(
+            convert_to_rgb
+        ),  # Convert PIL Image to RGB if it's not already.
+        Resize(
+            (64, 64)
+        ),  # Resize the image.
+        ToTensor(),  # Convert the PIL Image back to a tensor.
+    ]
+)
+data_module = OpenMLDataModule(
+    type_of_data="image",
+    file_dir="datasets",
+    filename_col="image_path",
+    target_mode="categorical",
+    target_column="label",
+    batch_size = 64,
+    transform=transform
+)
+trainer = OpenMLTrainerModule(
+    data_module=data_module,
+    verbose = True,
+    epoch_count = 1,
+)
+openml_pytorch.config.trainer = trainer
+```
+Run the model on the task
+```python
 run = openml.runs.run_model_on_task(model, task, avoid_duplicate_runs=False)
 run.publish()
 print('URL for run: %s/run/%d' % (openml.config.server, run.run_id))

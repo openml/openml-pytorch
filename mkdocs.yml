@@ -59,11 +59,15 @@ nav:
     - "OpenML Connection" : "API reference/OpenML Connection.md"
     - "Trainer" : "API reference/Trainer.md"
   - Examples:
-    - "Create Dataset and Task" : "Examples/Create Dataset and Task.ipynb"
-    - "Image Classification Task" : "Examples/Image Classification Task.ipynb"
-    - "Pretrained Transformer Image Classification Task" : "Examples/Pretrained Transformer Image Classification Task.ipynb"
-    - "Sequential Classification Task" : "Examples/Sequential Classification Task.ipynb"
-    - "Tabular Classification" : "Examples/Tabular Classification.ipynb"
+    - Beginner:
+      - "Create Dataset and Task" : "Examples/Create Dataset and Task.ipynb"
+      - "Image Classification Task" : "Examples/Image Classification Task.ipynb"
+      - "Pretrained Transformer Image Classification Task" : "Examples/Pretrained Transformer Image Classification Task.ipynb"
+      - "Sequential Classification Task" : "Examples/Sequential Classification Task.ipynb"
+      - "Tabular Classification" : "Examples/Tabular Classification.ipynb"
+    
+    - Advanced:
+      - "Choose a Custom Optimizer" : "Examples/Choose a Custom Optimizer.ipynb"
   - "Other Integrations" : "Integrations of OpenML in PyTorch.md"
   - "Limitations of the API":  "Limitations of the API.md"
   - "Philosphy behind the API Design" : "Philosophy behind the API Design.md"

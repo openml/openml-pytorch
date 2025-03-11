@@ -7,55 +7,56 @@ This module provides classes and methods to facilitate the configuration, data h
 - Managing data transformations and loaders.
 """
 
+import copy
+from datetime import datetime
 import gc
+import io
 import logging
-import re
-from types import SimpleNamespace
 import warnings
-import numpy as np
-import torch
-from typing import Any, Iterable, List, Optional, Tuple, Union
 from collections import OrderedDict
-from sklearn import preprocessing
-from sklearn.model_selection import train_test_split
+from functools import partial
+from types import SimpleNamespace
+from typing import Any, List, Optional
+
+import netron
+import numpy as np
+import onnx
+import pandas as pd
+import torch
+import torch.amp
+import torch.utils
+from openml.exceptions import PyOpenMLError
 from openml.tasks import (
-    OpenMLTask,
-    OpenMLSupervisedTask,
     OpenMLClassificationTask,
     OpenMLRegressionTask,
+    OpenMLSupervisedTask,
+    OpenMLTask,
 )
-import torch.amp
-import pandas as pd
-import copy
-import io
-import onnx
-import torch.utils
+from sklearn import preprocessing
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader
+from torchvision.transforms import Compose, Lambda, Resize, ToPILImage, ToTensor
 from tqdm import tqdm
-from .custom_datasets import OpenMLImageDataset, OpenMLTabularDataset
-from openml.exceptions import PyOpenMLError
-from types import SimpleNamespace
-import matplotlib.pyplot as plt
-from functools import partial
-import math
+from torch.utils.tensorboard.writer import SummaryWriter
 from .callbacks import *
-from .metrics import accuracy, accuracy_topk
-from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
-from abc import ABC, abstractmethod
+from .custom_datasets import OpenMLImageDataset, OpenMLTabularDataset
+from .metrics import accuracy
 
 
 def convert_to_rgb(image):
     """
-        Converts an image to RGB mode if it is not already in that mode.
+    Converts an image to RGB mode if it is not already in that mode.
 
-        Parameters:
-        image (PIL.Image): The image to be converted.
+    Parameters:
+    image (PIL.Image): The image to be converted.
 
-        Returns:
-        PIL.Image: The converted image in RGB mode.
+    Returns:
+    PIL.Image: The converted image in RGB mode.
     """
     if image.mode != "RGB":
         return image.convert("RGB")
     return image
+
 
 class DefaultConfigGenerator:
     """
@@ -104,9 +105,7 @@ class DefaultConfigGenerator:
         return output
 
     @staticmethod
-    def _default_predict_proba(
-        output: torch.Tensor, task: OpenMLTask
-    ) -> torch.Tensor:
+    def _default_predict_proba(output: torch.Tensor, task: OpenMLTask) -> torch.Tensor:
         """
         _default_predict_proba turns the outputs into probabilities using softmax
         """
@@ -125,9 +124,7 @@ class DefaultConfigGenerator:
         return tensor
 
     @staticmethod
-    def _default_retype_labels(
-         tensor: torch.Tensor, task: OpenMLTask
-    ) -> torch.Tensor:
+    def _default_retype_labels(tensor: torch.Tensor, task: OpenMLTask) -> torch.Tensor:
         """
         _default_retype_labels changes the type of the tensor to long for classification tasks and to float for regression tasks
         """
@@ -197,9 +194,7 @@ class DefaultConfigGenerator:
             # sanitize sanitizes the input data in order to ensure that models can be trained safely
             sanitize=self._default_sanitize,  # type: Callable[[torch.Tensor], torch.Tensor]
             # retype_labels changes the types of the labels in order to ensure type compatibility
-            retype_labels=(
-                self._default_retype_labels
-            ),  # type: Callable[[torch.Tensor, OpenMLTask], torch.Tensor]
+            retype_labels=(self._default_retype_labels),  # type: Callable[[torch.Tensor, OpenMLTask], torch.Tensor]
             # image_size is the size of the images that are fed into the model
             image_size=128,
             # batch_size represents the processing batch size for training
@@ -212,20 +207,24 @@ class DefaultConfigGenerator:
 
 class BaseDataHandler:
     """
-        BaseDataHandler class is an abstract base class for data handling operations.
+    BaseDataHandler class is an abstract base class for data handling operations.
     """
-    def prepare_data(self, X_train, y_train, X_val, y_val, data_config=None):
+
+    def prepare_data(
+        self, X_train, y_train, X_val, y_val, data_config: SimpleNamespace
+    ):
         raise NotImplementedError
 
-    def prepare_test_data(self, X_test, data_config=None):
+    def prepare_test_data(self, X_test, data_config: SimpleNamespace):
         raise NotImplementedError
 
 
 class OpenMLImageHandler(BaseDataHandler):
     """
-        OpenMLImageHandler is a class that extends BaseDataHandler to handle image data from OpenML datasets.
+    OpenMLImageHandler is a class that extends BaseDataHandler to handle image data from OpenML datasets.
     """
-    def prepare_data(self, X_train, y_train, X_val, y_val, data_config = None):
+
+    def prepare_data(self, X_train, y_train, X_val, y_val, data_config=None):
         train = OpenMLImageDataset(
             image_dir=data_config.file_dir,
             X=X_train,
@@ -242,7 +241,7 @@ class OpenMLImageHandler(BaseDataHandler):
         )
         return train, val
 
-    def prepare_test_data(self, X_test, data_config = None):
+    def prepare_test_data(self, X_test, data_config=None):
         test = OpenMLImageDataset(
             image_dir=data_config.file_dir,
             X=X_test,
@@ -257,12 +256,13 @@ class OpenMLTabularHandler(BaseDataHandler):
     """
     OpenMLTabularHandler is a class that extends BaseDataHandler to handle tabular data from OpenML datasets.
     """
-    def prepare_data(self, X_train, y_train, X_val, y_val, data_config = None):
+
+    def prepare_data(self, X_train, y_train, X_val, y_val, data_config=None):
         train = OpenMLTabularDataset(X=X_train, y=y_train)
         val = OpenMLTabularDataset(X=X_val, y=y_val)
         return train, val
 
-    def prepare_test_data(self, X_test, data_config = None):
+    def prepare_test_data(self, X_test, data_config=None):
         test = OpenMLTabularDataset(X=X_test, y=None)
         return test
 
@@ -285,7 +285,13 @@ class DataContainer:
         valid_dl: DataLoader object for the validation data.
         test_dl: Optional DataLoader object for the test data.
     """
-    def __init__(self, train_dl, valid_dl, test_dl=None):
+
+    def __init__(
+        self,
+        train_dl: DataLoader,
+        valid_dl: torch.utils.data.DataLoader,
+        test_dl: torch.utils.data.DataLoader = None,
+    ):  # type: ignore
         self.train_dl, self.valid_dl = train_dl, valid_dl
         self.test_dl = test_dl
 
@@ -320,7 +326,7 @@ class OpenMLDataModule:
         self.data_config.file_dir = file_dir
         self.data_config.target_mode = target_mode
         self.data_config.target_column = target_column
-        self.handler = data_handlers.get(type_of_data)
+        self.handler: BaseDataHandler | None = data_handlers.get(type_of_data)
 
         if transform is not None:
             self.data_config.transform = transform
@@ -336,6 +342,63 @@ class OpenMLDataModule:
         task,
     ):
         # Split the training data
+        X_train_train, X_val, y_train_train, y_val = self.split_training_data(X_train, y_train)
+
+        y_train_train, y_val, model_classes = self.encode_labels(y_train_train, y_val)
+
+        # Use handler to prepare datasets
+        train_loader, val_loader = self.prepare_datasets_for_training_and_validation(X_train_train, X_val, y_train_train, y_val)
+
+        # Prepare test data
+        test_loader = self.process_test_data(X_test)
+
+        return DataContainer(train_loader, val_loader, test_loader), model_classes
+
+    def process_test_data(self, X_test):
+        test = self.handler.prepare_test_data(X_test, self.data_config)
+        test_loader = DataLoader(
+            test, batch_size=self.data_config.batch_size, shuffle=False
+        )
+        
+        return test_loader
+
+    def prepare_datasets_for_training_and_validation(self, X_train_train, X_val, y_train_train, y_val):
+        if self.handler is None:
+            raise ValueError(
+                f"Data type {self.data_config.type_of_data} not supported."
+            )
+
+        train, val = self.handler.prepare_data(
+            X_train_train, y_train_train, X_val, y_val, self.data_config
+        )
+
+        train_loader = DataLoader(
+            train, batch_size=self.data_config.batch_size, shuffle=True
+        )
+        val_loader = DataLoader(
+            val, batch_size=self.data_config.batch_size, shuffle=False
+        )
+        
+        return train_loader,val_loader
+
+    def encode_labels(self, y_train_train, y_val):
+        """
+        Encode the labels for categorical data
+        """
+        if self.data_config.target_mode == "categorical":
+            label_encoder = preprocessing.LabelEncoder().fit(y_train_train)
+            y_train_train = pd.Series(label_encoder.transform(y_train_train))
+            y_val = pd.Series(label_encoder.transform(y_val))
+            # Determine model classes
+            model_classes = (
+                label_encoder.classes_
+                if self.data_config.target_mode == "categorical"
+                else None
+            )
+            
+        return y_train_train,y_val,model_classes
+
+    def split_training_data(self, X_train, y_train):
         if type(y_train) != pd.Series:
             y_train = pd.Series(y_train)
 
@@ -347,43 +410,8 @@ class OpenMLDataModule:
             stratify=y_train,
             random_state=0,
         )
-
-        # Encode the labels for categorical data
-        if self.data_config.target_mode == "categorical":
-            label_encoder = preprocessing.LabelEncoder().fit(y_train_train)
-            y_train_train = pd.Series(label_encoder.transform(y_train_train))
-            y_val = pd.Series(label_encoder.transform(y_val))
-            # Determine model classes
-            model_classes = (
-                label_encoder.classes_
-                if self.data_config.target_mode == "categorical"
-                else None
-            )
         
-        # if self.data_config.type_of_data == "dataframe":
-        #     # convert string columns to categorical columns
-        #     
-
-        # Use handler to prepare datasets
-        train, val = self.handler.prepare_data(
-            X_train_train, y_train_train, X_val, y_val, self.data_config
-        )
-
-        # Create DataLoaders
-        train_loader = torch.utils.data.DataLoader(
-            train, batch_size=self.data_config.batch_size, shuffle=True
-        )
-        val_loader = torch.utils.data.DataLoader(
-            val, batch_size=self.data_config.batch_size, shuffle=False
-        )
-
-        # Prepare test data
-        test = self.handler.prepare_test_data(X_test, self.data_config)
-        test_loader = torch.utils.data.DataLoader(
-            test, batch_size=self.data_config.batch_size, shuffle=False
-        )
-
-        return DataContainer(train_loader, val_loader, test_loader), model_classes
+        return X_train_train,X_val,y_train_train,y_val
 
 
 class ModelRunner:
@@ -422,12 +450,11 @@ class ModelRunner:
     def one_batch(self, xb, yb):
         try:
             self.xb, self.yb = xb, yb
-            self.xb = self.xb.to(self.learn.device)
-            self.yb = self.yb.to(self.learn.device)
+
+            self("begin_batch")
             # Below two lines are hack to convert model to onnx
             global sample_input
             sample_input = self.xb
-            self("begin_batch")
             self.pred = self.model(self.xb)
             self("after_pred")
             self.loss = self.criterion(self.pred, self.yb)
@@ -480,18 +507,22 @@ class ModelRunner:
 
 
 class Learner:
-    def __init__(self, model, opt, criterion, data, model_classes):
+    """
+    A class to store the model, optimizer, criterion, and data loaders for training and evaluation.
+    """
+
+    def __init__(self, model, opt, criterion, data, model_classes, device="cpu"):
         (
             self.model,
             self.opt,
             self.criterion,
             self.data,
             self.model_classes,
-        ) = (model, opt, criterion, data, model_classes)
+            self.device,
+        ) = (model, opt, criterion, data, model_classes, device)
 
 
 class OpenMLTrainerModule:
-
     def _default_progress_callback(
         self, fold: int, rep: int, epoch: int, step: int, loss: float, accuracy: float
     ):
@@ -504,12 +535,16 @@ class OpenMLTrainerModule:
             "[%d, %d, %d, %d] loss: %.4f, accuracy: %.4f"
             % (fold, rep, epoch, step, loss, accuracy)
         )
+
     def __init__(
         self,
+        experiment_name: str,
         data_module: OpenMLDataModule,
         callbacks: List[Callback] = [],
+        use_tensorboard: bool = True,
         **kwargs,
     ):
+        self.experiment_name = experiment_name
         self.config_gen = DefaultConfigGenerator()
         self.model_config = self.config_gen.return_model_config()
         self.data_module = data_module
@@ -524,28 +559,68 @@ class OpenMLTrainerModule:
         self.logger: logging.Logger = logging.getLogger(__name__)
 
         self.user_defined_measures = OrderedDict()
+        # Tensorboard support
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.tensorboard_writer = None
+
+        if use_tensorboard:
+            self.tensorboard_writer = SummaryWriter(
+                comment=experiment_name,
+                log_dir=f"tensorboard_logs/{experiment_name}/{timestamp}",
+            )
+
         # self.callbacks.append(LoggingCallback(self.logger, print_output=False))
         self.loss = 0
         self.training_state = True
 
         self.phases = [0.2, 0.8]
         self.scheds = combine_scheds(
-            self.phases, [sched_cos(1e-4, 5e-3), sched_cos(5e-3, 1e-3)]
+            self.phases, [sched_cos(1e-4, 1e-2), sched_cos(1e-3, 1e-5)]
         )
 
+        # Add default callbacks
         self.cbfs = [
             Recorder,
-            partial(AvgStatsCallBack, [accuracy]),
+            partial(AvgStatsCallback, accuracy),
             partial(ParamScheduler, "lr", self.scheds),
-            # TensorBoardCallback(),
+            partial(PutDataOnDeviceCallback, self.config.device),
         ]
+        if self.tensorboard_writer is not None:
+            self.cbfs.append(partial(TensorBoardCallback, self.tensorboard_writer))
 
-    def _onnx_export(self, model_copy):
+        self.add_callbacks()
+
+    def export_to_onnx(self, model_copy):
+        """
+        Converts the model to ONNX format. Uses a hack for now (global variable) to get the sample input.
+        """
+        global sample_input
         f = io.BytesIO()
         torch.onnx.export(model_copy, sample_input, f)
         onnx_model = onnx.load_model_from_string(f.getvalue())
         onnx_ = onnx_model.SerializeToString()
+        global last_models
+        last_models = onnx_
         return onnx_
+
+    def export_to_netron(self, onnx_file_name: str = f"model.onnx"):
+        """
+        Exports the model to ONNX format and serves it using netron.
+        """
+        if self.onnx_model is None:
+            try:
+                self.onnx_model = self.export_to_onnx(self.model)
+            except Exception as e:
+                raise ValueError("Model is not defined")
+            raise ValueError("Model is not defined")
+
+        # write the onnx model to a file
+        with open(onnx_file_name, "wb") as f:
+            f.write(self.onnx_model)
+            print(f"Writing onnx model to {onnx_file_name}. Delete if neeeded")
+
+        # serve with netro
+        netron.start(onnx_file_name)
 
     def run_model_on_fold(
         self,
@@ -556,16 +631,15 @@ class OpenMLTrainerModule:
         fold_no: int,
         y_train: Optional[pd.Series],
         X_test: pd.DataFrame,
-    ) -> Tuple[np.ndarray, Optional[np.ndarray], OrderedDict, Optional[Any]]:
-
+    ):
         # if task has no class labels, we assign the class labels to be the unique values in the training set
         if task.class_labels is None:
             task.class_labels = y_train.unique()
 
-        self.add_callbacks()
+        # Add the user defined callbacks
 
         self.model = copy.deepcopy(model)
-        
+
         try:
             data, model_classes = self.run_training(task, X_train, y_train, X_test)
 
@@ -581,10 +655,12 @@ class OpenMLTrainerModule:
             pred_y = [task.class_labels[i] for i in pred_y]
 
         # Convert model to onnx
-        onnx_ = self._onnx_export(self.model)
+        onnx_ = self.export_to_onnx(self.model)
 
+        # Hack to store the last model for ONNX conversion
         global last_models
-        last_models = onnx_
+        # last_models = onnx_
+        self.onnx_model = onnx_
 
         return pred_y, proba_y, self.user_defined_measures, None
 
@@ -613,7 +689,7 @@ class OpenMLTrainerModule:
         # prediction index id
         if not isinstance(classes, list):
             raise ValueError(
-                "please convert model classes to list prior to " "calling this fn"
+                "please convert model classes to list prior to calling this fn"
             )
         result = np.zeros((len(y), len(classes)), dtype=np.float32)
         for obs, prediction_idx in enumerate(y):
@@ -705,18 +781,34 @@ class OpenMLTrainerModule:
             gc.collect()
 
             self.runner = ModelRunner(cb_funcs=self.cbfs)
+
+            # some additional default callbacks
+            self.plot_loss = self.runner.cbs[1].plot_loss
+            self.plot_lr = self.runner.cbs[1].plot_lr
+            self.model_classes = model_classes
+
             self.learn.model.train()
             self.runner.fit(epochs=self.config.epoch_count, learn=self.learn)
             self.learn.model.eval()
 
+            self.lrs = self.runner.cbs[1].lrs
+
             print("Loss", self.runner.loss)
+        else:
+            raise Exception("OpenML Task type not supported")
         return data, model_classes
 
     def add_callbacks(self):
+        """
+        Adds the user-defined callbacks to the list of callbacks
+        """
         if self.callbacks is not None and len(self.callbacks) > 0:
             for callback in self.callbacks:
                 if callback not in self.cbfs:
                     self.cbfs.append(callback)
+                else:
+                    # replace the callback with the new one in the same position
+                    self.cbfs[self.cbfs.index(callback)] = callback
 
     def pred_test(self, task, model_copy, test_loader, predict_func):
         probabilities = []
