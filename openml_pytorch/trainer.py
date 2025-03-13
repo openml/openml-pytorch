@@ -827,3 +827,53 @@ class OpenMLTrainerModule:
             # Concatenate probabilities from all batches
         pred_y = np.concatenate(probabilities, axis=0)
         return pred_y
+
+# Define a trainer
+class BasicTrainer:
+    """
+    BasicTrainer class provides a simple training loop for PyTorch models.You pass in the model, loss function, optimizer, data loaders, and device. The fit method trains the model for the specified number of epochs.
+    """
+    def __init__(self, model: Any, loss_fn: Any, opt: Any, dataloader_train: torch.utils.data.DataLoader, dataloader_test: torch.utils.data.DataLoader, device: torch.device):
+        self.device = device
+        self.model = model.to(self.device)
+        self.loss_fn = loss_fn
+        self.opt = opt(self.model.parameters())
+        self.dataloader_train = dataloader_train
+        self.dataloader_test = dataloader_test
+        self.losses = {'train': [], 'test': []}
+
+    def train_step(self, x, y):
+        self.model.train()
+        self.opt.zero_grad()
+        yhat = self.model(x)
+        loss = self.loss_fn(yhat, y)
+        loss.backward()
+        self.opt.step()
+        return loss.item()
+
+    def test_step(self, x, y):
+        self.model.eval()
+        with torch.no_grad():
+            yhat = self.model(x)
+            loss = self.loss_fn(yhat, y)
+        return loss.item()
+    
+    def fit(self, epochs):
+        if self.dataloader_train is None:
+            raise ValueError('dataloader_train is not set')
+        if self.dataloader_test is None:
+            raise ValueError('dataloader_test is not set')
+        bar = tqdm(range(epochs), desc='Epochs')
+        for epoch in bar:
+            # train
+            for x, y in self.dataloader_train:
+                x, y = x.to(self.device), y.to(self.device)
+                loss = self.train_step(x, y)
+                self.losses['train'].append(loss)
+            # test
+            test_loss = 0
+            for x, y in self.dataloader_test:
+                x, y = x.to(self.device), y.to(self.device)
+                test_loss += self.test_step(x, y)
+                self.losses['test'].append(test_loss)
+            bar.set_postfix({'Train loss': loss, 'Test loss': test_loss, 'Epoch': epoch + 1})

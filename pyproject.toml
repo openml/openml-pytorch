@@ -1,32 +1,22 @@
-[tool.poetry]
+[project]
 name = "openml-pytorch"
-version = "0.1.0"
-description = ""
-authors = ["SubhadityaMukherjee <msubhaditya@gmail.com>", "Taniya Das <t.das@tue.nl>"]
+version = "0.1.2"
+description = "Pytorch extension for OpenML"
+authors = [
+    {name = "SubhadityaMukherjee", email = "msubhaditya@gmail.com"},
+    {name = "Taniya Das", email = "t.das@tue.nl"}
+]
 readme = "README.md"
+dynamic = ["dependencies", "optional-dependencies"]
+requires-python = ">=3.9"
 
-[tool.poetry.dependencies]
-python = "^3.10"
-onnx = "^1.16.2"
-openml = "^0.15.1"
-numpy = "<2.0.0"
-matplotlib = "^3.9.2"
-tensorboard = "^2.17.1"
-tab-transformer-pytorch = "^0.3.0"
-transformers = "^4.44.2"
-mkdocs-material = "^9.5.39"
-mkdocs-autorefs = "^1.2.0"
-mkdocs-redirects = "^1.2.1"
-mkdocs-jupyter = "^0.25.0"
-mkdocs-awesome-pages-plugin = "^2.9.3"
-mkdocstrings = "^0.26.1"
-mkdocstrings-python = "^1.11.1"
-mknotebooks = "^0.8.0"
-netron = "^8.1.3"
-torch = "^2.2.0"
-torchvision = "^0.17.0"
+[tool.setuptools]
+packages = ["openml_pytorch"]
 
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+optional-dependencies = {dev = { file = ["requirements-dev.txt"] }}
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"

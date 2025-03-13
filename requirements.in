@@ -1,0 +1,12 @@
+onnx
+openml
+numpy
+matplotlib
+tensorboard
+netron
+torch
+torchvision
+tqdm
+scikit_learn
+scipy
+pandas

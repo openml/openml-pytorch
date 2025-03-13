@@ -1,11 +1,10 @@
 LICENSE.md
 README.md
 pyproject.toml
-setup.py
+requirements-dev.txt
+requirements.txt
 openml_pytorch/__init__.py
-openml_pytorch/callbacks.py
 openml_pytorch/config.py
-openml_pytorch/custom_datasets.py
 openml_pytorch/extension.py
 openml_pytorch/metrics.py
 openml_pytorch/trainer.py

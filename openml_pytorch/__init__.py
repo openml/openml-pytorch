@@ -18,7 +18,9 @@ from .trainer import (
     OpenMLTabularHandler,
     OpenMLTrainerModule,
     convert_to_rgb,
+    BasicTrainer,
 )
+from .custom_datasets import GenericDataset
 
 __all__ = [
     "PytorchExtension",
@@ -39,6 +41,8 @@ __all__ = [
     "OpenMLTrainerModule",
     "accuracy",
     "accuracy_topk",
+    "GenericDataset",
+    "BasicTrainer",
 ]
 
 register_extension(PytorchExtension)
