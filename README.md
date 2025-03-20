@@ -60,7 +60,7 @@ class TabularClassificationModel(torch.nn.Module):
         x = self.softmax(x)
         return x
 
-# Train the model
+# Train the model. Feel free to replace this with your own training pipeline. 
 trainer = BasicTrainer(
     model = TabularClassificationModel(X_train.shape[1], len(np.unique(y_train))),
     loss_fn = torch.nn.CrossEntropyLoss(),

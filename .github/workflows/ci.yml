@@ -4,7 +4,6 @@ on:
     branches:
       - master 
       - main
-      - simple_dataloaders
 permissions:
   contents: write
 jobs:
