@@ -22,3 +22,9 @@ openml_pytorch/callbacks/helper.py
 openml_pytorch/callbacks/recording.py
 openml_pytorch/callbacks/tensorboard.py
 openml_pytorch/callbacks/training_callbacks.py
+openml_pytorch/custom_datasets/__init__.py
+openml_pytorch/custom_datasets/generic_dataset.py
+openml_pytorch/custom_datasets/image_dataset.py
+openml_pytorch/custom_datasets/tabular_dataset.py
+openml_pytorch/layers/__init__.py
+openml_pytorch/layers/functional.py

@@ -8,12 +8,12 @@ This module provides classes and methods to facilitate the configuration, data h
 """
 
 import copy
-from datetime import datetime
 import gc
 import io
 import logging
 import warnings
 from collections import OrderedDict
+from datetime import datetime
 from functools import partial
 from types import SimpleNamespace
 from typing import Any, Callable, List, Optional
@@ -25,6 +25,13 @@ import pandas as pd
 import torch
 import torch.amp
 import torch.utils
+from sklearn import preprocessing
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard.writer import SummaryWriter
+from torchvision.transforms import Compose, Lambda, Resize, ToPILImage, ToTensor
+from tqdm import tqdm
+
 from openml.exceptions import PyOpenMLError
 from openml.tasks import (
     OpenMLClassificationTask,
@@ -32,12 +39,7 @@ from openml.tasks import (
     OpenMLSupervisedTask,
     OpenMLTask,
 )
-from sklearn import preprocessing
-from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, Lambda, Resize, ToPILImage, ToTensor
-from tqdm import tqdm
-from torch.utils.tensorboard.writer import SummaryWriter
+
 from .callbacks import *
 from .custom_datasets import OpenMLImageDataset, OpenMLTabularDataset
 from .metrics import accuracy

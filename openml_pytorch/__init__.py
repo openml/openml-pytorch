@@ -1,5 +1,11 @@
 import json
+from pathlib import Path
 from typing import Any
+from urllib.request import urlretrieve
+
+import openml
+
+import netron
 
 from openml.extensions import register_extension
 
@@ -7,7 +13,6 @@ from . import config, custom_datasets, layers, trainer, extension
 from .callbacks import *
 from .extension import PytorchExtension
 from .metrics import accuracy, accuracy_topk, f1_score
-from pathlib import Path
 from .trainer import (
     BaseDataHandler,
     DataContainer,
@@ -21,18 +26,15 @@ from .trainer import (
     BasicTrainer,
 )
 from .custom_datasets import GenericDataset
-from urllib.request import urlretrieve
-import netron
-import openml
 
 __all__ = [
     "PytorchExtension",
     "layers",
-    "add_experiment_info_to_run",
-    "add_file_to_run",
     "trainer",
     "custom_datasets",
     "config",
+    "callbacks",
+    "metrics",
     "convert_to_rgb",
     "DefaultConfigGenerator",
     "BaseDataHandler",
@@ -46,12 +48,10 @@ __all__ = [
     "accuracy_topk",
     "GenericDataset",
     "BasicTrainer",
+    "add_experiment_info_to_run",
     "get_onnx_model_from_run_id",
-    "callbacks",
-    "metrics",
-    
+    "add_file_to_run",
 ]
-
 register_extension(PytorchExtension)
 
 
