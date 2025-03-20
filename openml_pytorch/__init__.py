@@ -47,6 +47,9 @@ __all__ = [
     "GenericDataset",
     "BasicTrainer",
     "get_onnx_model_from_run_id",
+    "callbacks",
+    "metrics",
+    
 ]
 
 register_extension(PytorchExtension)

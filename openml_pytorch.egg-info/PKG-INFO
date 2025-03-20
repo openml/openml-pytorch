@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: openml-pytorch
-Version: 0.1.2
+Version: 0.1.3
 Summary: Pytorch extension for OpenML
 Author-email: SubhadityaMukherjee <msubhaditya@gmail.com>, Taniya Das <t.das@tue.nl>
 Requires-Python: >=3.10
