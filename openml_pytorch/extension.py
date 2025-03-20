@@ -53,11 +53,21 @@ DEPENDENCIES_PATTERN = re.compile(
 )
 
 
+
 SIMPLE_NUMPY_TYPES = [
-    nptype
-    for type_cat, nptypes in np.sctypes.items()
-    for nptype in nptypes
-    if type_cat != "others"
+    np.bool_,
+    np.byte, np.ubyte,
+    np.short, np.ushort,
+    np.intc, np.uintc,
+    np.int_, np.uint,
+    np.longlong, np.ulonglong,
+    np.half, np.float16,
+    np.single, np.float32,
+    np.double, np.float64,
+    np.longdouble,
+    np.csingle, np.complex64,
+    np.cdouble,
+    np.clongdouble
 ]
 SIMPLE_TYPES = tuple([bool, int, float, str] + SIMPLE_NUMPY_TYPES)
 

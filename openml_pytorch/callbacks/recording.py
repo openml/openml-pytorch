@@ -5,47 +5,67 @@ import torch
 
 class Recorder(Callback):
     """
-    Recorder is a callback class used to record learning rates and losses during the training process.
+    Recorder is a callback class used to record learning rates, losses, and metrics during the training process.
     """
 
     def begin_fit(self):
         """
         Initializes attributes necessary for the fitting process.
-
-        Sets up learning rates and losses storage.
-
-        Attributes:
-            self.lrs (list): A list of lists, where each inner list will hold learning rates for a parameter group.
-            self.losses (list): An empty list to store loss values during the fitting process.
         """
         self.lrs = [[] for _ in self.opt.param_groups]
         self.losses = []
+        self.metrics = {metric.__name__: [] for metric in self.metrics} if hasattr(self, 'metrics') else {}
+        self.epochs = []
+        self.current_epoch = 0
 
+    def begin_epoch(self):
+        """
+        Handles operations at the beginning of each epoch.
+        """
+        self.current_epoch += 1
+        
     def after_batch(self):
         """
         Handles operations to execute after each training batch.
-
-        Modifies the learning rate for each parameter group in the optimizer
-        and appends the current learning rate and loss to the corresponding lists.
-
         """
         if not self.in_train:
             return
+        
         for pg, lr in zip(self.opt.param_groups, self.lrs):
             lr.append(pg["lr"])
+        
         self.losses.append(self.loss.detach().cpu())
+        
+    def after_epoch(self):
+        """
+        Records metrics at the end of each epoch.
+        """
+        self.epochs.append(self.current_epoch)
+        # Record metrics from AvgStatsCallback if available
+        if hasattr(self, 'run'):
+            for cb in self.run.cbs:
+                if isinstance(cb, AvgStatsCallback):
+                    for i, metric_fn in enumerate(cb.train_stats.metrics):
+                        metric_name = metric_fn.__name__
+                        if metric_name == "":
+                            metric_name = str(metric_fn)
+                        if metric_name not in self.metrics:
+                            self.metrics[metric_name] = []
+                        # Store both train and valid metrics
+                        self.metrics[metric_name].append({
+                            'train': cb.train_stats.avg_stats[i+1],  # +1 because avg_stats includes loss as first element
+                            'valid': cb.valid_stats.avg_stats[i+1]
+                        })
 
     def plot_lr(self, pgid=-1):
         """
         Plots the learning rate for a given parameter group.
         """
-        plot = plt.plot(self.lrs[pgid])
-        # self.writer.add_image("Learning rate", plot, 0)
-        return plot
+        return plt.plot(self.lrs[pgid])
 
     def plot_loss(self, skip_last=0):
         """
-        Plots the loss for a given parameter group.
+        Plots the loss values.
         """
         return plt.plot(self.losses[: len(self.losses) - skip_last])
 
@@ -58,7 +78,88 @@ class Recorder(Callback):
         n = len(losses) - skip_last
         plt.xscale("log")
         return plt.plot(lrs[:n], losses[:n])
-        # return losses, lrs
+    
+    def plot_metric(self, metric_name, skip_last=0):
+        """
+        Plots a specific metric over epochs.
+        
+        Args:
+            metric_name (str): Name of the metric to plot
+            skip_last (int): Number of last points to skip
+        """
+        if metric_name not in self.metrics:
+            print(f"Metric '{metric_name}' not found. Available metrics: {list(self.metrics.keys())}")
+            return
+        
+        train_vals = [d['train'] for d in self.metrics[metric_name]]
+        valid_vals = [d['valid'] for d in self.metrics[metric_name]]
+
+        # convert to cpu numpy if necessary
+        train_vals = [val.item() if isinstance(val, torch.Tensor) else val for val in train_vals]
+        valid_vals = [val.item() if isinstance(val, torch.Tensor) else val for val in valid_vals]
+        
+        
+        plt.figure(figsize=(10, 6))
+        plt.plot(self.epochs[:-skip_last] if skip_last > 0 else self.epochs, 
+                 train_vals[:-skip_last] if skip_last > 0 else train_vals, 
+                 label=f'Train {metric_name}')
+        plt.plot(self.epochs[:-skip_last] if skip_last > 0 else self.epochs, 
+                 valid_vals[:-skip_last] if skip_last > 0 else valid_vals, 
+                 label=f'Valid {metric_name}')
+        plt.xlabel('Epochs')
+        plt.ylabel(metric_name)
+        plt.title(f'{metric_name} vs. Epochs')
+        plt.legend()
+        return plt
+    
+    def plot_all_metrics(self, skip_last=0):
+        """
+        Plots all available metrics in subplots.
+
+        Args:
+            skip_last (int): Number of last points to skip for all metrics
+        """
+        num_metrics = len(self.metrics)
+        fig, axes = plt.subplots(num_metrics, 1, figsize=(10, 6 * num_metrics))
+        
+        # If there's only one metric, axes is not a list, so make sure we handle that.
+        if num_metrics == 1:
+            axes = [axes]
+        
+        for i, (metric_name, metric_data) in enumerate(self.metrics.items()):
+            train_vals = [d['train'] for d in metric_data]
+            valid_vals = [d['valid'] for d in metric_data]
+            
+            # convert to cpu numpy if necessary
+            train_vals = [val.item() if isinstance(val, torch.Tensor) else val for val in train_vals]
+            valid_vals = [val.item() if isinstance(val, torch.Tensor) else val for val in valid_vals]
+            
+            # Plot the data
+            axes[i].plot(self.epochs[:-skip_last] if skip_last > 0 else self.epochs, 
+                        train_vals[:-skip_last] if skip_last > 0 else train_vals, 
+                        label=f'Train {metric_name}')
+            axes[i].plot(self.epochs[:-skip_last] if skip_last > 0 else self.epochs, 
+                        valid_vals[:-skip_last] if skip_last > 0 else valid_vals, 
+                        label=f'Valid {metric_name}')
+            axes[i].set_xlabel('Epochs')
+            axes[i].set_ylabel(metric_name)
+            axes[i].set_title(f'{metric_name} vs. Epochs')
+            axes[i].legend()
+
+        # Adjust layout
+        plt.tight_layout()
+        plt.show()
+        return plt
+    
+    def get_metrics_history(self):
+        """
+        Returns a dictionary containing the history of all recorded metrics.
+        
+        Returns:
+            dict: A dictionary with metric names as keys and lists of values as values
+        """
+        return self.metrics
+
 
 class AvgStats:
     """
