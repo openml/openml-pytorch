@@ -4,6 +4,7 @@ import os
 import torchvision.transforms as T
 from torch.utils.data import Dataset
 from torchvision.io import read_image
+from PIL import Image
 
 
 class OpenMLImageDataset(Dataset):
@@ -32,11 +33,18 @@ class OpenMLImageDataset(Dataset):
 
     def __getitem__(self, idx):
         img_name = str(os.path.join(self.image_dir, self.X.iloc[idx, 0]))
-        image = read_image(img_name)
-        image = image.float()
+        
+        # Open the image using PIL instead of read_image
+        image = Image.open(img_name).convert("RGB")  # Ensure it's in RGB mode
+        
+        # Resize using PIL-based transform
         image = T.Resize((self.image_size, self.image_size))(image)
+         # Convert to tensor after all PIL transformations
+        image = T.ToTensor()(image)  
+        # Apply additional transformations if provided
         if self.transform_x is not None:
             image = self.transform_x(image)
+
         if self.y is not None:
             label = self.y.iloc[idx]
             if label is not None:

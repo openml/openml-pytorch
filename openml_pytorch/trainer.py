@@ -16,7 +16,7 @@ import warnings
 from collections import OrderedDict
 from functools import partial
 from types import SimpleNamespace
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 import netron
 import numpy as np
@@ -542,6 +542,7 @@ class OpenMLTrainerModule:
         data_module: OpenMLDataModule,
         callbacks: List[Callback] = [],
         use_tensorboard: bool = True,
+        metrics: List[Callable] = [],
         **kwargs,
     ):
         self.experiment_name = experiment_name
@@ -549,6 +550,7 @@ class OpenMLTrainerModule:
         self.model_config = self.config_gen.return_model_config()
         self.data_module = data_module
         self.callbacks = callbacks
+        self.metrics = metrics
 
         self.config = SimpleNamespace(
             **{**self.model_config.__dict__, **self.data_module.data_config.__dict__}
@@ -581,7 +583,7 @@ class OpenMLTrainerModule:
         # Add default callbacks
         self.cbfs = [
             Recorder,
-            partial(AvgStatsCallback, accuracy),
+            partial(AvgStatsCallback, self.metrics),
             partial(ParamScheduler, "lr", self.scheds),
             partial(PutDataOnDeviceCallback, self.config.device),
         ]
@@ -785,6 +787,8 @@ class OpenMLTrainerModule:
             # some additional default callbacks
             self.plot_loss = self.runner.cbs[1].plot_loss
             self.plot_lr = self.runner.cbs[1].plot_lr
+            self.plot_metric = self.runner.cbs[1].plot_metric
+            self.plot_all_metrics = self.runner.cbs[1].plot_all_metrics
             self.model_classes = model_classes
 
             self.learn.model.train()
@@ -877,3 +881,4 @@ class BasicTrainer:
                 test_loss += self.test_step(x, y)
                 self.losses['test'].append(test_loss)
             bar.set_postfix({'Train loss': loss, 'Test loss': test_loss, 'Epoch': epoch + 1})
+            

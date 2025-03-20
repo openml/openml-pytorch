@@ -6,7 +6,7 @@ from openml.extensions import register_extension
 from . import config, custom_datasets, layers, trainer, extension
 from .callbacks import *
 from .extension import PytorchExtension
-from .metrics import accuracy, accuracy_topk
+from .metrics import accuracy, accuracy_topk, f1_score
 from pathlib import Path
 from .trainer import (
     BaseDataHandler,
@@ -21,6 +21,9 @@ from .trainer import (
     BasicTrainer,
 )
 from .custom_datasets import GenericDataset
+from urllib.request import urlretrieve
+import netron
+import openml
 
 __all__ = [
     "PytorchExtension",
@@ -43,6 +46,7 @@ __all__ = [
     "accuracy_topk",
     "GenericDataset",
     "BasicTrainer",
+    "get_onnx_model_from_run_id",
 ]
 
 register_extension(PytorchExtension)
@@ -70,12 +74,14 @@ def add_file_to_run(run, file: Any, name: str = "onnx_model") -> None:
     run._get_file_elements = modified_get_file_elements
     return run
 
+
 def safe_add(attribute_dict, trainer, attribute_name, key):
     """Helper function to safely add trainer attribute to dictionary with error logging"""
     try:
         attribute_dict[key] = str(getattr(trainer, attribute_name, None))
     except Exception as e:
         print(f"Error adding {key}: {e}")
+
 
 def add_experiment_info_to_run(run, trainer):
     """
@@ -99,7 +105,7 @@ def add_experiment_info_to_run(run, trainer):
         "opt": "optimizer",
         "scheds": "scheduler",
         "criterion": "criterion",
-        "data_module.data_config": "data_config"
+        "data_module.data_config": "data_config",
     }
 
     # Add attributes to experiment info using safe_add function
@@ -115,19 +121,26 @@ def add_experiment_info_to_run(run, trainer):
         run = add_file_to_run(run, json.dumps(experiment_info), "experiment_info.json")
     except Exception as e:
         print(f"Error adding experiment info to run: {e}")
-    
-    
+
+    # Add losses to the run
+    run = add_losses_to_run(run, trainer)
+
+    # Add metric plots to the run
+    run = add_metric_plots_to_run(run, trainer)
+
     return run
+
 
 def add_learning_rates_to_run(run, trainer):
     """
     Add learning rates to the run object
     """
     try:
-        run = add_file_to_run(run, json.dumps(trainer.lrs) , "lrs.json")
+        run = add_file_to_run(run, json.dumps(trainer.lrs), "lrs.json")
     except Exception as e:
         print(f"Error adding lrs to run: {e}")
     return run
+
 
 def add_losses_to_run(run, trainer):
     """
@@ -136,10 +149,26 @@ def add_losses_to_run(run, trainer):
     try:
         tensor_losses = trainer.runner.recorder.losses
         tensor_losses = [loss.item() for loss in tensor_losses]
-        run = add_file_to_run(run, json.dumps(tensor_losses) , "losses.json")
+        run = add_file_to_run(run, json.dumps(tensor_losses), "losses.json")
     except Exception as e:
         print(f"Error adding losses to run: {e}")
     return run
+
+
+def add_metric_plots_to_run(run, trainer):
+    """
+    Add metric plots to the run object
+    """
+    try:
+        # run = add_file_to_run(run, trainer.plot_all_metrics(), "metrics.png")
+        # the plot_all_metrics function returns a pyplot figure, which is not serializable
+        # so we need to save it to a file first
+        trainer.plot_all_metrics().savefig("metrics.png")
+        run = add_file_to_run(run, open("metrics.png", "rb"), "metrics.png")
+    except Exception as e:
+        print(f"Error adding metrics to run: {e}")
+    return run
+
 
 def add_onnx_model_to_run(run, trainer):
     """
@@ -151,3 +180,11 @@ def add_onnx_model_to_run(run, trainer):
         print("No ONNX model found")
     return run
 
+
+def get_onnx_model_from_run_id(run_id):
+    run = openml.runs.get_run(run_id)
+    url = "https://api.openml.org/data/download/{}/model.onnx".format(
+        run.output_files["model_onnx"]
+    )
+    file_path, _ = urlretrieve(url, "./model.onnx")
+    netron.start(file_path, browse=False)
