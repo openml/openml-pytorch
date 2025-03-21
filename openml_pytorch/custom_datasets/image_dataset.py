@@ -33,9 +33,16 @@ class OpenMLImageDataset(Dataset):
 
     def __getitem__(self, idx):
         img_name = str(os.path.join(self.image_dir, self.X.iloc[idx, 0]))
+        # hotfix for .DS_Store files
+        if ".DS_Store" in img_name:
+            return self.__getitem__((idx + 1) % len(self))
         
         # Open the image using PIL instead of read_image
-        image = Image.open(img_name).convert("RGB")  # Ensure it's in RGB mode
+        try:
+            image = Image.open(img_name).convert("RGB")  # Ensure it's in RGB mode
+        except Exception as e:
+            print(f"Error opening image {img_name}: {e}")
+            return self.__getitem__((idx + 1) % len(self))
         
         # Resize using PIL-based transform
         image = T.Resize((self.image_size, self.image_size))(image)

@@ -770,15 +770,15 @@ class OpenMLTrainerModule:
             if self.config.device != "cpu":
                 self.criterion = self.criterion.to(self.config.device)
 
-            data, model_classes = self.data_module.get_data(
+            self.data, self.model_classes = self.data_module.get_data(
                 X_train, y_train, X_test, task
             )
             self.learn = Learner(
                 self.model,
                 self.opt,
                 self.criterion,
-                data,
-                model_classes,
+                self.data,
+                self.model_classes,
             )
             self.learn.device = self.device
             self.learn.model.to(self.device)
@@ -787,11 +787,11 @@ class OpenMLTrainerModule:
             self.runner = ModelRunner(cb_funcs=self.cbfs)
 
             # some additional default callbacks
-            self.plot_loss = self.runner.cbs[1].plot_loss
-            self.plot_lr = self.runner.cbs[1].plot_lr
-            self.plot_metric = self.runner.cbs[1].plot_metric
-            self.plot_all_metrics = self.runner.cbs[1].plot_all_metrics
-            self.model_classes = model_classes
+            self.stats = self.runner.cbs[1]
+            self.plot_loss = self.stats.plot_loss
+            self.plot_lr = self.stats.plot_lr
+            self.plot_metric = self.stats.plot_metric
+            self.plot_all_metrics = self.stats.plot_all_metrics
 
             self.learn.model.train()
             self.runner.fit(epochs=self.config.epoch_count, learn=self.learn)
@@ -802,7 +802,7 @@ class OpenMLTrainerModule:
             print("Loss", self.runner.loss)
         else:
             raise Exception("OpenML Task type not supported")
-        return data, model_classes
+        return self.data, self.model_classes
 
     def add_callbacks(self):
         """

@@ -33,7 +33,11 @@ class OpenMLTabularDataset(Dataset):
     def __getitem__(self, idx):
         # x is the input data, y is the target value from the target column
         x = self.data.iloc[idx, :]
-        x = torch.tensor(x.values.astype("float32"))
+        try:
+            x = torch.tensor(x.values.astype("float32"))
+        except Exception as e:
+            print(f"Error converting data to tensor: {e}")
+            return self.__getitem__((idx + 1) % len(self))
         if self.y is not None:
             y = self.y[idx]
             y = torch.tensor(y)

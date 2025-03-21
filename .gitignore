@@ -89,3 +89,4 @@ venv
 venv.bak/
 venv/
 wheels/
+metrics.png
