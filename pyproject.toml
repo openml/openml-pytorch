@@ -30,13 +30,13 @@ dependencies = [
     "mkdocs-autorefs (>=1.4.1,<2.0.0)"
 ]
 
-[tool.poetry]
-packages = [
-    {include = "openml_pytorch"},
+# [tool.poetry]
+# packages = [
+    # {include = "openml_pytorch"},
     # {include = "openml_pytorch.callbacks"},
     # {include = "openml_pytorch.custom_datasets"},
     # {include = "openml_pytorch.layers"},
-]
+# ]
 
 [tool.poetry.group.dev.dependencies]
 netron = "^8.2.1"
