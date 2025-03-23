@@ -66,9 +66,9 @@ class DefaultConfigGenerator:
     """
 
     @staticmethod
-    def _default_criterion_gen(task: OpenMLTask) -> torch.nn.Module:
+    def _default_loss_fn_gen(task: OpenMLTask) -> torch.nn.Module:
         """
-        _default_criterion_gen returns a criterion based on the task type - regressions use
+        _default_loss_fn_gen returns a loss fn based on the task type - regressions use
         torch.nn.SmoothL1Loss while classifications use torch.nn.CrossEntropyLoss
         """
         if isinstance(task, OpenMLRegressionTask):
@@ -161,6 +161,16 @@ class DefaultConfigGenerator:
                 ToTensor(),  # Convert the PIL Image back to a tensor.
             ]
         )
+    
+    def default_image_transform_test(self):
+        return Compose(
+            [
+                ToPILImage(),  # Convert tensor to PIL Image to ensure PIL Image operations can be applied.
+                Lambda(convert_to_rgb),  # Convert PIL Image to RGB if it's not already.
+                Resize((128, 128)),  # Resize the image.
+                ToTensor(),  # Convert the PIL Image back to a tensor.
+            ]
+        )
 
     def return_model_config(self):
         """
@@ -169,9 +179,9 @@ class DefaultConfigGenerator:
 
         return SimpleNamespace(
             device=self.get_device(),
-            criterion=self._default_criterion_gen,
-            optimizer_gen=self._default_optimizer_gen,
-            scheduler_gen=self._default_scheduler_gen,
+            loss_fn=self._default_loss_fn_gen,
+            opt=self._default_optimizer_gen,
+            # scheduler=self._default_scheduler_gen,
             # predict turns the outputs of the model into actual predictions
             predict=self._default_predict,  # type: Callable[[torch.Tensor, OpenMLTask], torch.Tensor]
             # predict_proba turns the outputs of the model into probabilities for each class
@@ -204,6 +214,7 @@ class DefaultConfigGenerator:
             data_augmentation=None,
             validation_split=0.1,
             transform=self.default_image_transform(),
+            transform_test=self.default_image_transform_test(),
         )
 
 
@@ -238,7 +249,7 @@ class OpenMLImageHandler(BaseDataHandler):
             image_dir=data_config.file_dir,
             X=X_val,
             y=y_val,
-            transform_x=data_config.transform,
+            transform_x=data_config.transform_test,
             image_size=data_config.image_size,
         )
         return train, val
@@ -248,7 +259,7 @@ class OpenMLImageHandler(BaseDataHandler):
             image_dir=data_config.file_dir,
             X=X_test,
             y=None,
-            transform_x=data_config.transform,
+            transform_x=data_config.transform_test,
             image_size=data_config.image_size,
         )
         return test
@@ -318,6 +329,7 @@ class OpenMLDataModule:
         file_dir="images",
         target_mode="categorical",
         transform=None,
+        transform_test=None,
         target_column="encoded_labels",
         **kwargs,
     ):
@@ -332,6 +344,8 @@ class OpenMLDataModule:
 
         if transform is not None:
             self.data_config.transform = transform
+        if transform_test is not None:
+            self.data_config.transform_test = transform_test
 
         if not self.handler:
             raise ValueError(f"Data type {type_of_data} not supported.")
@@ -434,8 +448,8 @@ class ModelRunner:
         return self.learn.model
 
     @property
-    def criterion(self):
-        return self.learn.criterion
+    def loss_fn(self):
+        return self.learn.loss_fn
 
     @property
     def data(self):
@@ -459,7 +473,7 @@ class ModelRunner:
             sample_input = self.xb
             self.pred = self.model(self.xb)
             self("after_pred")
-            self.loss = self.criterion(self.pred, self.yb)
+            self.loss = self.loss_fn(self.pred, self.yb)
             self("after_loss")
             if not self.in_train:
                 return
@@ -510,18 +524,18 @@ class ModelRunner:
 
 class Learner:
     """
-    A class to store the model, optimizer, criterion, and data loaders for training and evaluation.
+    A class to store the model, optimizer, loss_fn, and data loaders for training and evaluation.
     """
 
-    def __init__(self, model, opt, criterion, data, model_classes, device="cpu"):
+    def __init__(self, model, opt, loss_fn, data, model_classes, device="cpu"):
         (
             self.model,
             self.opt,
-            self.criterion,
+            self.loss_fn,
             self.data,
             self.model_classes,
             self.device,
-        ) = (model, opt, criterion, data, model_classes, device)
+        ) = (model, opt, loss_fn, data, model_classes, device)
 
 
 class OpenMLTrainerModule:
@@ -760,15 +774,15 @@ class OpenMLTrainerModule:
         if isinstance(task, OpenMLSupervisedTask) or isinstance(
             task, OpenMLClassificationTask
         ):
-            self.opt = self.config.optimizer_gen(self.model, task)(
+            self.opt = self.config.opt(self.model, task)(
                 self.model.parameters()
             )
 
-            self.criterion = self.config.criterion(task)
+            self.loss_fn = self.config.loss_fn(task)
             self.device = self.config.device
 
             if self.config.device != "cpu":
-                self.criterion = self.criterion.to(self.config.device)
+                self.loss_fn = self.loss_fn.to(self.config.device)
 
             self.data, self.model_classes = self.data_module.get_data(
                 X_train, y_train, X_test, task
@@ -776,7 +790,7 @@ class OpenMLTrainerModule:
             self.learn = Learner(
                 self.model,
                 self.opt,
-                self.criterion,
+                self.loss_fn,
                 self.data,
                 self.model_classes,
             )
