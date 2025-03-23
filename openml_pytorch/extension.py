@@ -16,7 +16,6 @@ from collections import OrderedDict  # noqa: F401
 from distutils.version import LooseVersion
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
-from transformers import PreTrainedModel
 import numpy as np
 import onnx
 import openml
