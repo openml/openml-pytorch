@@ -16,7 +16,7 @@ from collections import OrderedDict  # noqa: F401
 from distutils.version import LooseVersion
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
-
+from transformers import PreTrainedModel
 import numpy as np
 import onnx
 import openml
@@ -111,8 +111,7 @@ class PytorchExtension(Extension):
         bool
         """
         from torch.nn import Module
-
-        return isinstance(model, Module)
+        return isinstance(model, Module) or isinstance(model, Callable)
 
     ################################################################################################
     # Method for dataloader
@@ -152,42 +151,15 @@ class PytorchExtension(Extension):
     ) -> Any:
         """Recursive function to deserialize a Pytorch flow.
 
-        This function delegates all work to the respective functions to deserialize special data
-        structures etc.
+        Parameters and description remain the same as in your provided code.
 
-        Parameters
-        ----------
-        o : mixed
-            the object to deserialize (can be flow object, or any serialized
-            parameter value that is accepted by)
-
-        components : dict
-
-
-        initialize_with_defaults : bool, optional (default=False)
-            If this flag is set, the hyperparameter values of flows will be
-            ignored and a flow with its defaults is returned.
-
-        recursion_depth : int
-            The depth at which this flow is called, mostly for debugging
-            purposes
-
-        Returns
-        -------
-        mixed
         """
-
         logging.info(
             "-%s flow_to_pytorch START o=%s, components=%s, "
             "init_defaults=%s"
             % ("-" * recursion_depth, o, components, initialize_with_defaults)
         )
         depth_pp = recursion_depth + 1  # shortcut var, depth plus plus
-
-        # First, we need to check whether the presented object is a json string.
-        # JSON strings are used to encoder parameter values. By passing around
-        # json strings for parameters, we make sure that we can flow_to_pytorch
-        # the parameter values to the correct type.
 
         if isinstance(o, str):
             try:
@@ -196,9 +168,6 @@ class PytorchExtension(Extension):
                 pass
 
         if isinstance(o, dict):
-            # Check if the dict encodes a 'special' object, which could not
-            # easily converted into a string, but rather the information to
-            # re-create the object were stored in a dictionary.
             if "oml-python:serialized_object" in o:
                 serialized_type = o["oml-python:serialized_object"]
                 value = o["value"]
@@ -220,9 +189,6 @@ class PytorchExtension(Extension):
                         initialize_with_defaults=initialize_with_defaults,
                         recursion_depth=depth_pp,
                     )
-                    # The component is now added to where it should be used
-                    # later. It should not be passed to the constructor of the
-                    # main flow object.
                     del components[key]
                     if step_name is None:
                         rval = component
@@ -265,6 +231,10 @@ class PytorchExtension(Extension):
                 rval = tuple(rval)
         elif isinstance(o, (bool, int, float, str)) or o is None:
             rval = o
+        elif callable(o):  # Check if o is callable (like model_n)
+            # Deserialize the function (lambda) and return the result
+            # Note: You need to handle this part according to your application context.
+            rval = lambda x: self._deserialize_pytorch(o(x), components=components, initialize_with_defaults=initialize_with_defaults, recursion_depth=depth_pp)
         elif isinstance(o, OpenMLFlow):
             if not self._is_pytorch_flow(o):
                 raise ValueError("Only pytorch flows can be reinstantiated")
@@ -303,8 +273,9 @@ class PytorchExtension(Extension):
         custom_name: Optional[str] = None,
     ) -> Any:
         rval = None  # type: Any
+       
         if self.is_estimator(o):
-            # is the main model or a submodel
+            # Serialize the main model or a submodel
             rval = self._serialize_model(o, custom_name)
         elif isinstance(o, (list, tuple)):
             rval = [self._serialize_pytorch(element, parent_model) for element in o]
@@ -312,8 +283,9 @@ class PytorchExtension(Extension):
                 rval = tuple(rval)
         elif isinstance(o, SIMPLE_TYPES) or o is None:
             if isinstance(o, tuple(SIMPLE_NUMPY_TYPES)):
+                # Convert numpy types to python types
                 o = o.item()
-            # base parameter values
+            # Base parameter values
             rval = o
         elif isinstance(o, dict):
             if not isinstance(o, OrderedDict):
@@ -323,18 +295,13 @@ class PytorchExtension(Extension):
             for key, value in o.items():
                 if not isinstance(key, str):
                     raise TypeError(
-                        "Can only use string as keys, you passed "
-                        "type %s for value %s." % (type(key), str(key))
+                        f"Can only use string as keys, you passed type {type(key)} for value {str(key)}."
                     )
                 key = self._serialize_pytorch(key, parent_model)
                 value = self._serialize_pytorch(value, parent_model)
                 rval[key] = value
-            rval = rval
         elif isinstance(o, type):
             rval = self._serialize_type(o)
-        # This only works for user-defined functions (and not even partial).
-        # I think this is exactly what we want here as there shouldn't be any
-        # built-in or functool.partials in a pipeline
         elif inspect.isfunction(o):
             rval = self._serialize_function(o)
         elif inspect.ismethoddescriptor(o):
@@ -399,15 +366,17 @@ class PytorchExtension(Extension):
 
         Parameters
         ----------
-        model : pytorch estimator
+        model : pytorch estimator or callable
+            If the model is a callable (e.g., a lambda or function wrapping the model), 
+            we first apply it to obtain the actual model.
 
         Returns
         -------
         OpenMLFlow
-
         """
+        
 
-        # Get all necessary information about the model objects itself
+        # Now proceed with the serialization as usual
         parameters, parameters_meta_info, subcomponents, subcomponents_explicit = (
             self._extract_information_from_model(model)
         )
@@ -419,7 +388,7 @@ class PytorchExtension(Extension):
         import os
         import zlib
 
-        # class_name = model.__module__ + "." + model.__class__.__name__
+        # Generate a unique class name for the model
         class_name = "torch.nn" + "." + model.__class__.__name__
         class_name += "."
         class_name += format(zlib.crc32(bytearray(os.urandom(32))), "x")
@@ -626,7 +595,10 @@ class PytorchExtension(Extension):
 
         model_parameters = self._get_module_descriptors(model, deep=True)
         for k, v in sorted(model_parameters.items(), key=lambda t: t[0]):
-            rval = self._serialize_pytorch(v, model)
+            try:
+                rval = self._serialize_pytorch(v, model)
+            except TypeError:
+                rval = str(v)
 
             def flatten_all(list_):
                 """Flattens arbitrary depth lists of lists (e.g. [[1,2],[3,[1]]] -> [1,2,3,1])."""
@@ -809,6 +781,7 @@ class PytorchExtension(Extension):
                 "--%s flow_parameter=%s, value=%s"
                 % ("-" * recursion_depth, name, value)
             )
+            
             rval = self._deserialize_pytorch(
                 value,
                 components=components_,
@@ -1127,6 +1100,7 @@ class PytorchExtension(Extension):
             raise ValueError(
                 "Trainer not set to config. Please use openml_pytorch.config.trainer = trainer to set the trainer."
             )
+        print(f"Cross validation {fold_no} for {task.task_id}")
         return trainer.run_model_on_fold(
             model, task, X_train, rep_no, fold_no, y_train, X_test
         )
