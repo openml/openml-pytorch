@@ -79,20 +79,6 @@ class DefaultConfigGenerator:
             raise ValueError(task)
 
     @staticmethod
-    def _default_optimizer_gen(model: torch.nn.Module, _: OpenMLTask):
-        """
-        _default_optimizer_gen returns the torch.optim.Adam optimizer for the given model
-        """
-        return torch.optim.Adam
-
-    @staticmethod
-    def _default_scheduler_gen(optim, _: OpenMLTask) -> Any:
-        """
-        _default_scheduler_gen returns the torch.optim.lr_scheduler.ReduceLROnPlateau scheduler for the given optimizer
-        """
-        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optim)
-
-    @staticmethod
     def _default_predict(output: torch.Tensor, task: OpenMLTask) -> torch.Tensor:
         """
         _default_predict turns the outputs into predictions by returning the argmax of the output tensor for classification tasks, and by flattening the prediction in case of the regression
@@ -180,18 +166,12 @@ class DefaultConfigGenerator:
         return SimpleNamespace(
             device=self.get_device(),
             loss_fn=self._default_loss_fn_gen,
-            opt=self._default_optimizer_gen,
-            # scheduler=self._default_scheduler_gen,
             # predict turns the outputs of the model into actual predictions
             predict=self._default_predict,  # type: Callable[[torch.Tensor, OpenMLTask], torch.Tensor]
             # predict_proba turns the outputs of the model into probabilities for each class
             predict_proba=self._default_predict_proba,  # type: Callable[[torch.Tensor], torch.Tensor]
             # epoch_count represents the number of epochs the model should be trained for
             epoch_count=3,  # type: int,
-            # progress_callback=(
-            #     self._default_progress_callback
-            # ),  # type: Callable[[int, int, int, int, float, float], None]
-            # enable progress bar
             verbose=True,
         )
 
@@ -556,6 +536,8 @@ class OpenMLTrainerModule:
         self,
         experiment_name: str,
         data_module: OpenMLDataModule,
+        opt: Callable = torch.optim.Adam,
+        loss_fn: Callable = torch.nn.CrossEntropyLoss,
         callbacks: List[Callback] = [],
         use_tensorboard: bool = True,
         metrics: List[Callable] = [],
@@ -573,6 +555,9 @@ class OpenMLTrainerModule:
         )
         # update the config with the user defined values
         self.config.__dict__.update(kwargs)
+        self.config.opt = opt
+        if loss_fn is not None:
+            self.loss_fn = loss_fn()
         self.config.progress_callback = self._default_progress_callback
         self.logger: logging.Logger = logging.getLogger(__name__)
 
@@ -774,11 +759,11 @@ class OpenMLTrainerModule:
         if isinstance(task, OpenMLSupervisedTask) or isinstance(
             task, OpenMLClassificationTask
         ):
-            self.opt = self.config.opt(self.model, task)(
+            self.opt = self.config.opt(
                 self.model.parameters()
             )
-
-            self.loss_fn = self.config.loss_fn(task)
+            if self.loss_fn is None:
+                self.loss_fn = self.config.loss_fn(task)
             self.device = self.config.device
 
             if self.config.device != "cpu":

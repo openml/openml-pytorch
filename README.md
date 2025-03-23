@@ -86,7 +86,7 @@ import torch.optim
 import openml_pytorch.config
 import openml
 import logging
-
+import torch
 from openml_pytorch.trainer import OpenMLTrainerModule
 from openml_pytorch.trainer import OpenMLDataModule
 from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
@@ -127,6 +127,7 @@ trainer = OpenMLTrainerModule(
     data_module=data_module,
     verbose = True,
     epoch_count = 1,
+    opt = torch.optim.Adam,
 )
 openml_pytorch.config.trainer = trainer
 ```
