@@ -6,7 +6,12 @@ For a more native experience, PyTorch itself provides OpenML integrations for so
 
 ## Installation Instructions:
 
-`pip install openml-pytorch`
+<!-- `pip install openml-pytorch` -->
+While this project does exist on pypi, while everything is being finalized, it is recommended to install the package directly from the repository. 
+
+```bash
+pip install git+https://github.com/openml/openml-pytorch -U
+```
 
 PyPi link https://pypi.org/project/openml-pytorch/
 
