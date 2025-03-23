@@ -470,13 +470,14 @@ class ModelRunner:
     def all_batches(self, dl):
         self.iters = len(dl)
         try:
-            for xb, yb in tqdm(dl, leave=False):
+            for xb, yb in tqdm(dl, leave=False, desc=f"Training Epoch {self.epoch}", total=self.iters):
                 self.one_batch(xb, yb)
         except CancelEpochException:
             self("after_cancel_epoch")
 
     def fit(self, epochs, learn):
         self.epochs, self.learn, self.loss = epochs, learn, torch.tensor(0.0)
+        self.current_epoch = 0
         try:
             for cb in self.cbs:
                 cb.set_runner(self)
@@ -489,6 +490,7 @@ class ModelRunner:
                     if not self("begin_validate"):
                         self.all_batches(self.data.valid_dl)
                 self("after_epoch")
+                self.current_epoch += 1
         except CancelTrainException:
             self("after_cancel_train")
         finally:

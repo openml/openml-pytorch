@@ -70,7 +70,13 @@ class Recorder(Callback):
         """
         Plots the learning rate for a given parameter group.
         """
+        # check if empty
+        if not self.lrs[pgid]:
+            print("No learning rates recorded.")
+            return
         plot = plt.plot(self.lrs[pgid])
+        plt.xlabel("Iterations")
+        plt.ylabel("Learning Rate")
         if save_path:
             plt.savefig(save_path)
         return plot
@@ -79,7 +85,13 @@ class Recorder(Callback):
         """
         Plots the loss values.
         """
+        # check if empty
+        if not self.losses:
+            print("No losses recorded.")
+            return
         plot = plt.plot(self.losses[: len(self.losses) - skip_last])
+        plt.xlabel("Iterations")
+        plt.ylabel("Loss")
 
         if save_path:
             plt.savefig(save_path)
@@ -93,6 +105,8 @@ class Recorder(Callback):
         lrs = self.lrs[pgid]
         n = len(losses) - skip_last
         plt.xscale("log")
+        plt.xlabel("Learning Rate")
+        plt.ylabel("Loss")
         return plt.plot(lrs[:n], losses[:n])
 
     def plot_metric(self, metric_name, skip_last=0, save_path=None):
@@ -103,6 +117,10 @@ class Recorder(Callback):
             metric_name (str): Name of the metric to plot
             skip_last (int): Number of last points to skip
         """
+        # check if empty
+        if not self.metrics:
+            print("No metrics recorded.")
+            return
         if metric_name not in self.metrics:
             print(
                 f"Metric '{metric_name}' not found. Available metrics: {list(self.metrics.keys())}"
@@ -147,6 +165,13 @@ class Recorder(Callback):
         Args:
             skip_last (int): Number of last points to skip for all metrics
         """
+        # check if empty
+        if not self.metrics:
+            print("No metrics recorded.")
+            return
+        if len(self.metrics) == 0:
+            print("No metrics recorded.")
+            return
         num_metrics = len(self.metrics)
         fig, axes = plt.subplots(num_metrics, 1, figsize=(10, 6 * num_metrics))
 
@@ -254,7 +279,12 @@ class AvgStats:
     def __repr__(self):
         if not self.count:
             return ""
-        return f"{'train' if self.in_train else 'valid'}: {self.avg_stats}"
+        phase = "train" if self.in_train else "valid"
+        try:
+            return f"{phase} loss: {self.avg_stats[0]:.4f} | accuracy: {self.avg_stats[1]:.4f} | other metrics: {self.avg_stats[2:]}"
+        except IndexError:
+            return f"{phase} loss: {self.avg_stats[0]:.4f} | other metrics: {self.avg_stats[1:]}"
+
 
 
 class AvgStatsCallback(Callback):
@@ -287,5 +317,10 @@ class AvgStatsCallback(Callback):
             stats.accumulate(self.run)
 
     def after_epoch(self):
-        print(self.train_stats)
-        print(self.valid_stats)
+        current_epoch = self.current_epoch
+        print(f"\n{'='*40}")
+        print(f"Epoch {current_epoch}")
+        print(f"{'-'*40}")
+        print(f"Train: {self.train_stats}")
+        print(f"Valid: {self.valid_stats}")
+        print(f"{'='*40}\n")
