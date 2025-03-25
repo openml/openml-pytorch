@@ -80,69 +80,99 @@ trainer.fit(10)
 
 Import openML libraries
 ```python
-import torch.nn
-import torch.optim
-
-import openml_pytorch.config
+# openml imports
 import openml
-import logging
-import torch
-from openml_pytorch.trainer import OpenMLTrainerModule
-from openml_pytorch.trainer import OpenMLDataModule
-from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
-import torchvision
+import openml_pytorch as op
+from openml_pytorch.callbacks import TestCallback
+from openml_pytorch.metrics import accuracy
 from openml_pytorch.trainer import convert_to_rgb
 
-```
-Create a pytorch model and get a task from openML
-```python
-model = torchvision.models.efficientnet_b0(num_classes=200)
-# Download the OpenML task for tiniest imagenet
-task = openml.tasks.get_task(362128)
-```
-Download the task from openML and define Data and Trainer configuration
-```python
+# pytorch imports
+from torch.utils.tensorboard.writer import SummaryWriter
+from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
+import torchvision
+
+# other imports
+import logging
+import warnings
+
+# set up logging
+openml.config.logger.setLevel(logging.DEBUG)
+op.config.logger.setLevel(logging.DEBUG)
+warnings.simplefilter(action='ignore')
+## Data
+### Define image transformations
+
+
 transform = Compose(
     [
         ToPILImage(),  # Convert tensor to PIL Image to ensure PIL Image operations can be applied.
-        Lambda(
-            convert_to_rgb
-        ),  # Convert PIL Image to RGB if it's not already.
-        Resize(
-            (64, 64)
-        ),  # Resize the image.
+        Lambda(convert_to_rgb),  # Convert PIL Image to RGB if it's not already.
+        Resize((64, 64)),  # Resize the image.
         ToTensor(),  # Convert the PIL Image back to a tensor.
     ]
 )
-data_module = OpenMLDataModule(
+
+### Configure the Data Module and Choose a Task
+"""
+- Make sure the data is present in the `file_dir` directory, and the `filename_col` is correctly set along with this column correctly pointing to where your data is stored. 
+"""
+data_module = op.OpenMLDataModule(
     type_of_data="image",
     file_dir="datasets",
     filename_col="image_path",
     target_mode="categorical",
     target_column="label",
-    batch_size = 64,
-    transform=transform
+    batch_size=64,
+    transform=transform,
 )
-trainer = OpenMLTrainerModule(
+
+# Download the OpenML task for tiniest imagenet
+task = openml.tasks.get_task(363295)
+
+## Model
+model = torchvision.models.resnet18(num_classes=200)
+## Train your model on the data
+#- Note that by default, OpenML runs a 10 fold cross validation on the data. You cannot change this for now.
+import torch
+
+trainer = op.OpenMLTrainerModule(
+    experiment_name= "Tiny ImageNet",
     data_module=data_module,
-    verbose = True,
-    epoch_count = 1,
+    verbose=True,
+    epoch_count=2,
+    metrics= [accuracy],
+    # remove the TestCallback when you are done testing your pipeline. Having it here will make the pipeline run for a very short time.
+    callbacks=[
+        # TestCallback,
+    ],
     opt = torch.optim.Adam,
 )
-openml_pytorch.config.trainer = trainer
-```
-Run the model on the task
-```python
+op.config.trainer = trainer
 run = openml.runs.run_model_on_task(model, task, avoid_duplicate_runs=False)
+## View information about your run
+### Learning rate and loss plot
+trainer.plot_loss()
+trainer.plot_lr()
+trainer.plot_all_metrics()
+### Class labels
+trainer.model_classes
+## Model Vizualization
+#- Sometimes you may want to visualize the model. You can either use netron or tensorboard for this purpose.
+### Netron
+trainer.export_to_netron()
+### Tensorboard
+"""
+- By default, openml will log the tensorboard logs in the `tensorboard_logs` directory. You can view the logs by running `tensorboard --logdir tensorboard_logs` in the terminal.
+"""
+## Publish your model to OpenML
+"""
+- This is Optional, but publishing your model to OpenML will allow you to track your experiments and compare them with others.
+- Make sure to set your apikey first.
+  - You can find your apikey on your OpenML account page.
+"""
+trainer.plot_all_metrics()
+openml.config.apikey = ''
+run = op.add_experiment_info_to_run(run=run, trainer=trainer) 
 run.publish()
-print('URL for run: %s/run/%d' % (openml.config.server, run.run_id))
-```
-Note: The input layer of the network should be compatible with OpenML data output shape. Please check [examples](/examples/) for more information.
-
-Additionally, if you want to publish the run with onnx file, then you must call ```openml_pytorch.add_experiment_info_to_run()``` immediately before ```run.publish()```. 
-
-```python
-run = openml_pytorch.add_experiment_info_to_run(run=run, trainer=trainer)
-run.publish()
-print('URL for run: %s/run/%d' % (openml.config.server, run.run_id))
 ```

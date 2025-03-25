@@ -286,7 +286,6 @@ class AvgStats:
             return f"{phase} loss: {self.avg_stats[0]:.4f} | other metrics: {self.avg_stats[1:]}"
 
 
-
 class AvgStatsCallback(Callback):
     """
     AvgStatsCallBack class is a custom callback used to track and print average statistics for training and validation phases during the training loop.

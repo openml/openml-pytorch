@@ -1,4 +1,3 @@
-
 import os
 
 import torchvision.transforms as T
@@ -36,18 +35,18 @@ class OpenMLImageDataset(Dataset):
         # hotfix for .DS_Store files
         if ".DS_Store" in img_name:
             return self.__getitem__((idx + 1) % len(self))
-        
+
         # Open the image using PIL instead of read_image
         try:
             image = Image.open(img_name).convert("RGB")  # Ensure it's in RGB mode
         except Exception as e:
             print(f"Error opening image {img_name}: {e}")
             return self.__getitem__((idx + 1) % len(self))
-        
+
         # Resize using PIL-based transform
         image = T.Resize((self.image_size, self.image_size))(image)
-         # Convert to tensor after all PIL transformations
-        image = T.ToTensor()(image)  
+        # Convert to tensor after all PIL transformations
+        image = T.ToTensor()(image)
         # Apply additional transformations if provided
         if self.transform_x is not None:
             image = self.transform_x(image)

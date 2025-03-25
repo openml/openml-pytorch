@@ -5,6 +5,7 @@ It includes functions to compute the accuracy, top-k accuracy of model predictio
 
 import torch
 
+
 def accuracy(out, yb):
     """
 
@@ -37,7 +38,8 @@ def accuracy_topk(out, yb, k=5):
     """
     return (torch.topk(out, k, dim=1)[1] == yb.long().unsqueeze(1)).float().mean()
 
-def f1_score(out , yb):
+
+def f1_score(out, yb):
     """
     Computes the F1 score for the given model outputs and true labels.
 
@@ -57,5 +59,5 @@ def f1_score(out , yb):
     recall = tp / (tp + fn + 1e-8)
 
     f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
-    
+
     return f1

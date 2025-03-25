@@ -25,15 +25,52 @@ trainer = OpenMLTrainerModule(
 ## Useful Callbacks:
 - TestCallback: Use when you are testing out new code and want to iterate through the training loop quickly. Stops training after 2 iterations.
 """
+
 import torch
+
 torch.Tensor.ndim = property(lambda x: len(x.shape))
 
 from .helper import listify, camel2snake
 from .callback import Callback
-from .annealing import annealer, sched_lin, sched_cos, sched_no, sched_exp, combine_scheds, ParamScheduler
-from .training_callbacks import TrainEvalCallback, CancelTrainException, CancelEpochException, CancelBatchException, TestCallback
+from .annealing import (
+    annealer,
+    sched_lin,
+    sched_cos,
+    sched_no,
+    sched_exp,
+    combine_scheds,
+    ParamScheduler,
+)
+from .training_callbacks import (
+    TrainEvalCallback,
+    CancelTrainException,
+    CancelEpochException,
+    CancelBatchException,
+    TestCallback,
+)
 from .recording import Recorder, AvgStats, AvgStatsCallback
 from .device_callbacks import PutDataOnDeviceCallback
 from .tensorboard import TensorBoardCallback
 
-__all__ = ['Callback', 'annealer', 'sched_lin', 'sched_cos', 'sched_no', 'sched_exp', 'combine_scheds', 'ParamScheduler', 'TrainEvalCallback', 'CancelTrainException', 'CancelEpochException', 'CancelBatchException', 'TestCallback', 'Recorder', 'AvgStats','AvgStatsCallback', 'PutDataOnDeviceCallback', 'TensorBoardCallback', 'listify', 'camel2snake']
+__all__ = [
+    "Callback",
+    "annealer",
+    "sched_lin",
+    "sched_cos",
+    "sched_no",
+    "sched_exp",
+    "combine_scheds",
+    "ParamScheduler",
+    "TrainEvalCallback",
+    "CancelTrainException",
+    "CancelEpochException",
+    "CancelBatchException",
+    "TestCallback",
+    "Recorder",
+    "AvgStats",
+    "AvgStatsCallback",
+    "PutDataOnDeviceCallback",
+    "TensorBoardCallback",
+    "listify",
+    "camel2snake",
+]

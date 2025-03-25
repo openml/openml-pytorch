@@ -151,6 +151,7 @@ def add_learning_rates_to_run(run, trainer):
         print(f"Error adding lrs to run: {e}")
     return run
 
+
 def add_learning_rate_plots_to_run(run, trainer):
     """
     Add learning rate plots to the run object
@@ -161,7 +162,7 @@ def add_learning_rate_plots_to_run(run, trainer):
         # so we need to save it to a file first
         trainer.plot_lr(save_path="lr.png")
         run = add_file_to_run(run, open("lr.png", "rb"), "lr.png")
-        os.unlink("lr.png") # Remove the file after adding it to the run
+        os.unlink("lr.png")  # Remove the file after adding it to the run
     except Exception as e:
         print(f"Error adding lrs to run: {e}")
     return run
@@ -190,10 +191,11 @@ def add_metric_plots_to_run(run, trainer):
         # so we need to save it to a file first
         trainer.plot_all_metrics(save_path="metrics.png")
         run = add_file_to_run(run, open("metrics.png", "rb"), "metrics.png")
-        os.unlink("metrics.png") # Remove the file after adding it to the run
+        os.unlink("metrics.png")  # Remove the file after adding it to the run
     except Exception as e:
         print(f"Error adding metrics to run: {e}")
     return run
+
 
 def add_loss_plots_to_run(run, trainer):
     """
@@ -205,10 +207,11 @@ def add_loss_plots_to_run(run, trainer):
         # so we need to save it to a file first
         trainer.plot_loss(save_path="loss.png")
         run = add_file_to_run(run, open("loss.png", "rb"), "loss.png")
-        os.unlink("loss.png") # Remove the file after adding it to the run
+        os.unlink("loss.png")  # Remove the file after adding it to the run
     except Exception as e:
         print(f"Error adding loss to run: {e}")
     return run
+
 
 def add_onnx_model_to_run(run, trainer):
     """

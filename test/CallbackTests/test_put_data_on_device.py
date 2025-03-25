@@ -3,17 +3,18 @@ import torch
 from unittest.mock import MagicMock
 from openml_pytorch.callbacks import PutDataOnDeviceCallback
 
+
 class TestPutDataOnDeviceCallback(unittest.TestCase):
 
     def setUp(self):
         # Setup for testing, creating a mock model and runner
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
+
         # Creating mock data
         self.xb = torch.randn(2, 3)  # Batch of 2, 3 features
         self.yb = torch.randint(0, 2, (2,))  # Batch of 2, binary targets
         self.pred = torch.randn(2, 3)  # Batch of predictions
-        
+
         # Mocking the runner object
         self.run = MagicMock()
         self.run.xb = self.xb
