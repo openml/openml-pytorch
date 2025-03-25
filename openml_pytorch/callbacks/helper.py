@@ -1,7 +1,9 @@
 from typing import Iterable
 import re
+
 _camel_re1 = re.compile("(.)([A-Z][a-z]+)")
 _camel_re2 = re.compile("([a-z0-9])([A-Z])")
+
 
 def listify(o=None) -> list:
     """

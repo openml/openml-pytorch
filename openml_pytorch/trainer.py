@@ -147,7 +147,7 @@ class DefaultConfigGenerator:
                 ToTensor(),  # Convert the PIL Image back to a tensor.
             ]
         )
-    
+
     def default_image_transform_test(self):
         return Compose(
             [
@@ -173,6 +173,9 @@ class DefaultConfigGenerator:
             # epoch_count represents the number of epochs the model should be trained for
             epoch_count=3,  # type: int,
             verbose=True,
+            schduler=None,
+            opt_kwargs={},
+            scheduler_kwargs={},
         )
 
     def return_data_config(self):
@@ -186,7 +189,9 @@ class DefaultConfigGenerator:
             # sanitize sanitizes the input data in order to ensure that models can be trained safely
             sanitize=self._default_sanitize,  # type: Callable[[torch.Tensor], torch.Tensor]
             # retype_labels changes the types of the labels in order to ensure type compatibility
-            retype_labels=(self._default_retype_labels),  # type: Callable[[torch.Tensor, OpenMLTask], torch.Tensor]
+            retype_labels=(
+                self._default_retype_labels
+            ),  # type: Callable[[torch.Tensor, OpenMLTask], torch.Tensor]
             # image_size is the size of the images that are fed into the model
             image_size=128,
             # batch_size represents the processing batch size for training
@@ -338,12 +343,16 @@ class OpenMLDataModule:
         task,
     ):
         # Split the training data
-        X_train_train, X_val, y_train_train, y_val = self.split_training_data(X_train, y_train)
+        X_train_train, X_val, y_train_train, y_val = self.split_training_data(
+            X_train, y_train
+        )
 
         y_train_train, y_val, model_classes = self.encode_labels(y_train_train, y_val)
 
         # Use handler to prepare datasets
-        train_loader, val_loader = self.prepare_datasets_for_training_and_validation(X_train_train, X_val, y_train_train, y_val)
+        train_loader, val_loader = self.prepare_datasets_for_training_and_validation(
+            X_train_train, X_val, y_train_train, y_val
+        )
 
         # Prepare test data
         test_loader = self.process_test_data(X_test)
@@ -355,10 +364,12 @@ class OpenMLDataModule:
         test_loader = DataLoader(
             test, batch_size=self.data_config.batch_size, shuffle=False
         )
-        
+
         return test_loader
 
-    def prepare_datasets_for_training_and_validation(self, X_train_train, X_val, y_train_train, y_val):
+    def prepare_datasets_for_training_and_validation(
+        self, X_train_train, X_val, y_train_train, y_val
+    ):
         if self.handler is None:
             raise ValueError(
                 f"Data type {self.data_config.type_of_data} not supported."
@@ -374,8 +385,8 @@ class OpenMLDataModule:
         val_loader = DataLoader(
             val, batch_size=self.data_config.batch_size, shuffle=False
         )
-        
-        return train_loader,val_loader
+
+        return train_loader, val_loader
 
     def encode_labels(self, y_train_train, y_val):
         """
@@ -391,8 +402,8 @@ class OpenMLDataModule:
                 if self.data_config.target_mode == "categorical"
                 else None
             )
-            
-        return y_train_train,y_val,model_classes
+
+        return y_train_train, y_val, model_classes
 
     def split_training_data(self, X_train, y_train):
         if type(y_train) != pd.Series:
@@ -406,8 +417,8 @@ class OpenMLDataModule:
             stratify=y_train,
             random_state=0,
         )
-        
-        return X_train_train,X_val,y_train_train,y_val
+
+        return X_train_train, X_val, y_train_train, y_val
 
 
 class ModelRunner:
@@ -446,9 +457,7 @@ class ModelRunner:
     def one_batch(self, xb, yb):
         try:
             self.xb, self.yb = xb, yb
-
             self("begin_batch")
-            # Below two lines are hack to convert model to onnx
             global sample_input
             sample_input = self.xb
             self.pred = self.model(self.xb)
@@ -470,7 +479,9 @@ class ModelRunner:
     def all_batches(self, dl):
         self.iters = len(dl)
         try:
-            for xb, yb in tqdm(dl, leave=False, desc=f"Training Epoch {self.epoch}", total=self.iters):
+            for xb, yb in tqdm(
+                dl, leave=False, desc=f"Training Epoch {self.epoch}", total=self.iters
+            ):
                 self.one_batch(xb, yb)
         except CancelEpochException:
             self("after_cancel_epoch")
@@ -491,6 +502,8 @@ class ModelRunner:
                         self.all_batches(self.data.valid_dl)
                 self("after_epoch")
                 self.current_epoch += 1
+                if self.learn.scheduler:
+                    self.learn.scheduler.step()
         except CancelTrainException:
             self("after_cancel_train")
         finally:
@@ -509,15 +522,18 @@ class Learner:
     A class to store the model, optimizer, loss_fn, and data loaders for training and evaluation.
     """
 
-    def __init__(self, model, opt, loss_fn, data, model_classes, device="cpu"):
+    def __init__(
+        self, model, opt, loss_fn, scheduler, data, model_classes, device="cpu"
+    ):
         (
             self.model,
             self.opt,
             self.loss_fn,
+            self.scheduler,
             self.data,
             self.model_classes,
             self.device,
-        ) = (model, opt, loss_fn, data, model_classes, device)
+        ) = (model, opt, loss_fn, scheduler, data, model_classes, device)
 
 
 class OpenMLTrainerModule:
@@ -538,11 +554,14 @@ class OpenMLTrainerModule:
         self,
         experiment_name: str,
         data_module: OpenMLDataModule,
-        opt: Callable = torch.optim.Adam,
+        opt: Callable = torch.optim.AdamW,
+        opt_kwargs: dict = {"lr": 3e-4, "weight_decay": 1e-4},
         loss_fn: Callable = torch.nn.CrossEntropyLoss,
         callbacks: List[Callback] = [],
         use_tensorboard: bool = True,
         metrics: List[Callable] = [],
+        scheduler=torch.optim.lr_scheduler.CosineAnnealingLR,
+        scheduler_kwargs: dict = {"T_max": 50, "eta_min": 1e-6},
         **kwargs,
     ):
         self.experiment_name = experiment_name
@@ -558,6 +577,7 @@ class OpenMLTrainerModule:
         # update the config with the user defined values
         self.config.__dict__.update(kwargs)
         self.config.opt = opt
+        self.config.opt_kwargs = opt_kwargs
         if loss_fn is not None:
             self.loss_fn = loss_fn()
         self.config.progress_callback = self._default_progress_callback
@@ -579,15 +599,14 @@ class OpenMLTrainerModule:
         self.training_state = True
 
         self.phases = [0.2, 0.8]
-        self.scheds = combine_scheds(
-            self.phases, [sched_cos(1e-4, 1e-2), sched_cos(1e-3, 1e-5)]
-        )
+        self.config.scheduler = scheduler
+        self.config.scheduler_kwargs = scheduler_kwargs
 
         # Add default callbacks
         self.cbfs = [
             Recorder,
             partial(AvgStatsCallback, self.metrics),
-            partial(ParamScheduler, "lr", self.scheds),
+            # partial(ParamScheduler, "lr", self.scheds),
             partial(PutDataOnDeviceCallback, self.config.device),
         ]
         if self.tensorboard_writer is not None:
@@ -762,7 +781,10 @@ class OpenMLTrainerModule:
             task, OpenMLClassificationTask
         ):
             self.opt = self.config.opt(
-                self.model.parameters()
+                self.model.parameters(), **self.config.opt_kwargs
+            )
+            self.scheduler = self.config.scheduler(
+                optimizer=self.opt, **self.config.scheduler_kwargs
             )
             if self.loss_fn is None:
                 self.loss_fn = self.config.loss_fn(task)
@@ -775,11 +797,12 @@ class OpenMLTrainerModule:
                 X_train, y_train, X_test, task
             )
             self.learn = Learner(
-                self.model,
-                self.opt,
-                self.loss_fn,
-                self.data,
-                self.model_classes,
+                model=self.model,
+                opt=self.opt,
+                loss_fn=self.loss_fn,
+                scheduler=self.scheduler,
+                data=self.data,
+                model_classes=self.model_classes,
             )
             self.learn.device = self.device
             self.learn.model.to(self.device)
@@ -835,19 +858,29 @@ class OpenMLTrainerModule:
         pred_y = np.concatenate(probabilities, axis=0)
         return pred_y
 
+
 # Define a trainer
 class BasicTrainer:
     """
     BasicTrainer class provides a simple training loop for PyTorch models.You pass in the model, loss function, optimizer, data loaders, and device. The fit method trains the model for the specified number of epochs.
     """
-    def __init__(self, model: Any, loss_fn: Any, opt: Any, dataloader_train: torch.utils.data.DataLoader, dataloader_test: torch.utils.data.DataLoader, device: torch.device):
+
+    def __init__(
+        self,
+        model: Any,
+        loss_fn: Any,
+        opt: Any,
+        dataloader_train: torch.utils.data.DataLoader,
+        dataloader_test: torch.utils.data.DataLoader,
+        device: torch.device,
+    ):
         self.device = device
         self.model = model.to(self.device)
         self.loss_fn = loss_fn
         self.opt = opt(self.model.parameters())
         self.dataloader_train = dataloader_train
         self.dataloader_test = dataloader_test
-        self.losses = {'train': [], 'test': []}
+        self.losses = {"train": [], "test": []}
 
     def train_step(self, x, y):
         self.model.train()
@@ -864,24 +897,25 @@ class BasicTrainer:
             yhat = self.model(x)
             loss = self.loss_fn(yhat, y)
         return loss.item()
-    
+
     def fit(self, epochs):
         if self.dataloader_train is None:
-            raise ValueError('dataloader_train is not set')
+            raise ValueError("dataloader_train is not set")
         if self.dataloader_test is None:
-            raise ValueError('dataloader_test is not set')
-        bar = tqdm(range(epochs), desc='Epochs')
+            raise ValueError("dataloader_test is not set")
+        bar = tqdm(range(epochs), desc="Epochs")
         for epoch in bar:
             # train
             for x, y in self.dataloader_train:
                 x, y = x.to(self.device), y.to(self.device)
                 loss = self.train_step(x, y)
-                self.losses['train'].append(loss)
+                self.losses["train"].append(loss)
             # test
             test_loss = 0
             for x, y in self.dataloader_test:
                 x, y = x.to(self.device), y.to(self.device)
                 test_loss += self.test_step(x, y)
-                self.losses['test'].append(test_loss)
-            bar.set_postfix({'Train loss': loss, 'Test loss': test_loss, 'Epoch': epoch + 1})
-            
+                self.losses["test"].append(test_loss)
+            bar.set_postfix(
+                {"Train loss": loss, "Test loss": test_loss, "Epoch": epoch + 1}
+            )

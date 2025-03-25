@@ -1,6 +1,7 @@
 import re
 from .helper import camel2snake
 
+
 class Callback:
     """
 

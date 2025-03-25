@@ -1,5 +1,6 @@
 from .callback import Callback
 
+
 class TensorBoardCallback(Callback):
     """
     Log specific things to TensorBoard.

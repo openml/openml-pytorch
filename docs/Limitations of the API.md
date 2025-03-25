@@ -1,3 +1,6 @@
 # Limitations
-- Image datasets are supported as a workaround by using a CSV file with image paths. This is not ideal and might eventually be replaced by something else. At the moment, the focus is on tabular data.
-- Many features (like custom metrics, models etc) are still dependant on the OpenML Python API, which is in the middle of a major rewrite. Until that is complete, this package will not be able to provide all the features it aims to.
+- The way OpenML Pytorch works is by using the [OpenMl python extension API](https://openml.github.io/openml-python/develop/extensions.html). The latter relies on a method called `run_model_on_fold`, which requires any other extensions to pass their information through this function. In essence, this means it is not currently possible to just have a "minimal" extension, where you can have any training pipeline and it "just works" with OpenML. 
+- To counteract this, we have created two kinds of examples, one where you can ignore this limitation and just use data from OpenML along with your own pipelines [example1](./Examples/Getting%20data%20from%20OpenML.ipynb) and the rest of them where you can use the API we provide to train your models and upload them to OpenML [example2](./Examples/Images/Image%20Classification%20Task.ipynb).
+
+## Image datasets
+- OpenML so far does not focus on image datasets, and as such, they are stored as a header file (think of it as a table with file names and say categories in the case of classification). For some datasets, OpenML provides a way to download the image folders directly, but this is not always the case. This will eventually be replaced by something nicer, but for now, this is the way it is.

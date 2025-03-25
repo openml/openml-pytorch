@@ -32,8 +32,12 @@ from openml.exceptions import PyOpenMLError
 from openml.extensions import Extension, register_extension
 from openml.flows import OpenMLFlow
 from openml.runs.trace import OpenMLRunTrace, OpenMLTraceIteration
-from openml.tasks import (OpenMLClassificationTask, OpenMLRegressionTask,
-                          OpenMLSupervisedTask, OpenMLTask)
+from openml.tasks import (
+    OpenMLClassificationTask,
+    OpenMLRegressionTask,
+    OpenMLSupervisedTask,
+    OpenMLTask,
+)
 from sklearn import preprocessing
 
 from openml_pytorch.trainer import OpenMLTrainerModule
@@ -52,21 +56,29 @@ DEPENDENCIES_PATTERN = re.compile(
 )
 
 
-
 SIMPLE_NUMPY_TYPES = [
     np.bool_,
-    np.byte, np.ubyte,
-    np.short, np.ushort,
-    np.intc, np.uintc,
-    np.int_, np.uint,
-    np.longlong, np.ulonglong,
-    np.half, np.float16,
-    np.single, np.float32,
-    np.double, np.float64,
+    np.byte,
+    np.ubyte,
+    np.short,
+    np.ushort,
+    np.intc,
+    np.uintc,
+    np.int_,
+    np.uint,
+    np.longlong,
+    np.ulonglong,
+    np.half,
+    np.float16,
+    np.single,
+    np.float32,
+    np.double,
+    np.float64,
     np.longdouble,
-    np.csingle, np.complex64,
+    np.csingle,
+    np.complex64,
     np.cdouble,
-    np.clongdouble
+    np.clongdouble,
 ]
 SIMPLE_TYPES = tuple([bool, int, float, str] + SIMPLE_NUMPY_TYPES)
 
@@ -110,6 +122,7 @@ class PytorchExtension(Extension):
         bool
         """
         from torch.nn import Module
+
         return isinstance(model, Module) or isinstance(model, Callable)
 
     ################################################################################################
@@ -233,7 +246,12 @@ class PytorchExtension(Extension):
         elif callable(o):  # Check if o is callable (like model_n)
             # Deserialize the function (lambda) and return the result
             # Note: You need to handle this part according to your application context.
-            rval = lambda x: self._deserialize_pytorch(o(x), components=components, initialize_with_defaults=initialize_with_defaults, recursion_depth=depth_pp)
+            rval = lambda x: self._deserialize_pytorch(
+                o(x),
+                components=components,
+                initialize_with_defaults=initialize_with_defaults,
+                recursion_depth=depth_pp,
+            )
         elif isinstance(o, OpenMLFlow):
             if not self._is_pytorch_flow(o):
                 raise ValueError("Only pytorch flows can be reinstantiated")
@@ -272,7 +290,7 @@ class PytorchExtension(Extension):
         custom_name: Optional[str] = None,
     ) -> Any:
         rval = None  # type: Any
-       
+
         if self.is_estimator(o):
             # Serialize the main model or a submodel
             rval = self._serialize_model(o, custom_name)
@@ -306,7 +324,11 @@ class PytorchExtension(Extension):
         elif inspect.ismethoddescriptor(o):
             rval = self._serialize_methoddescriptor(o)
         else:
-            raise TypeError(o, type(o))
+            rval = str(o)
+            # raise TypeError(o, type(o))
+            print(
+                "While models of this type are not officially supported, we will try to serialize them anyway."
+            )
         return rval
 
     def get_version_information(self) -> List[str]:
@@ -366,14 +388,13 @@ class PytorchExtension(Extension):
         Parameters
         ----------
         model : pytorch estimator or callable
-            If the model is a callable (e.g., a lambda or function wrapping the model), 
+            If the model is a callable (e.g., a lambda or function wrapping the model),
             we first apply it to obtain the actual model.
 
         Returns
         -------
         OpenMLFlow
         """
-        
 
         # Now proceed with the serialization as usual
         parameters, parameters_meta_info, subcomponents, subcomponents_explicit = (
@@ -780,7 +801,7 @@ class PytorchExtension(Extension):
                 "--%s flow_parameter=%s, value=%s"
                 % ("-" * recursion_depth, name, value)
             )
-            
+
             rval = self._deserialize_pytorch(
                 value,
                 components=components_,
@@ -841,7 +862,7 @@ class PytorchExtension(Extension):
             return model_class(
                 function=parameter_dict["function"],
                 *parameter_dict["args"],
-                **parameter_dict["kwargs"]
+                **parameter_dict["kwargs"],
             )
 
         return model_class(**parameter_dict)
@@ -1099,7 +1120,7 @@ class PytorchExtension(Extension):
             raise ValueError(
                 "Trainer not set to config. Please use openml_pytorch.config.trainer = trainer to set the trainer."
             )
-        print(f"Cross validation {fold_no} for {task.task_id}")
+        print(f"Cross validation {fold_no} for task {task.task_id}")
         return trainer.run_model_on_fold(
             model, task, X_train, rep_no, fold_no, y_train, X_test
         )
