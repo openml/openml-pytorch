@@ -306,7 +306,9 @@ class PytorchExtension(Extension):
         elif inspect.ismethoddescriptor(o):
             rval = self._serialize_methoddescriptor(o)
         else:
-            raise TypeError(o, type(o))
+            rval = str(o)
+            # raise TypeError(o, type(o))
+            print("While models of this type are not officially supported, we will try to serialize them anyway.")
         return rval
 
     def get_version_information(self) -> List[str]:
