@@ -1,4 +1,4 @@
-
+*.pth
 *$py.class
 *.cover
 *.egg
