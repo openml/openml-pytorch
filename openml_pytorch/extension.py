@@ -324,10 +324,15 @@ class PytorchExtension(Extension):
         elif inspect.ismethoddescriptor(o):
             rval = self._serialize_methoddescriptor(o)
         else:
-            rval = str(o)
-            # raise TypeError(o, type(o))
+            # rval = str(o)
+            # Store saying its unsupported
+            rval = OrderedDict(
+                (
+                    ("oml-python:serialized_object", "unsupported"),
+                )
+            )
             print(
-                "While models of this type are not officially supported, we will try to serialize them anyway."
+                "While layers of this type are not officially supported yet, we will try to serialize them anyway."
             )
         return rval
 
