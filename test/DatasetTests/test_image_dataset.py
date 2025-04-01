@@ -37,7 +37,7 @@ class TestOpenMLImageDataset(unittest.TestCase):
         # Test __getitem__ with label transformation
         image, label = self.dataset[0]  # Get first item
         self.assertEqual(
-            image.shape, (4, self.image_size, self.image_size)
+            image.shape, (3, self.image_size, self.image_size)
         )  # Image shape should be (3, H, W)
         self.assertEqual(label, 0)  # Label should be 0
 
@@ -48,7 +48,7 @@ class TestOpenMLImageDataset(unittest.TestCase):
         )
         image = self.dataset_no_label[0]
         self.assertEqual(
-            image.shape, (4, self.image_size, self.image_size)
+            image.shape, (3, self.image_size, self.image_size)
         )  # Image shape should be (3, H, W)
 
     def test_len(self):
@@ -67,5 +67,5 @@ class TestOpenMLImageDataset(unittest.TestCase):
         )
         image, label = dataset_with_transform[0]
         self.assertEqual(
-            image.shape, (4, 128, 128)
+            image.shape, (3, 128, 128)
         )  # Image should be resized to 128x128

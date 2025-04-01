@@ -910,11 +910,9 @@ class PytorchExtension(Extension):
     def _serialize_type(self, o: Any) -> "OrderedDict[str, str]":
         mapping = {
             float: "float",
-            np.float: "np.float",
             np.float32: "np.float32",
             np.float64: "np.float64",
             int: "int",
-            np.int: "np.int",
             np.int32: "np.int32",
             np.int64: "np.int64",
         }
@@ -926,11 +924,9 @@ class PytorchExtension(Extension):
     def _deserialize_type(self, o: str) -> Any:
         mapping = {
             "float": float,
-            "np.float": np.float,
             "np.float32": np.float32,
             "np.float64": np.float64,
             "int": int,
-            "np.int": np.int,
             "np.int32": np.int32,
             "np.int64": np.int64,
         }
