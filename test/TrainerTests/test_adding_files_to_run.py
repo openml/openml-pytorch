@@ -1,3 +1,13 @@
+import pytest
+import json
+import torch
+from unittest.mock import MagicMock, patch
+import openml
+from pathlib import Path
+from openml_pytorch.run_utils import (
+    add_file_to_run,
+    safe_add,
+)
 from pathlib import Path
 import pytest
 import openml
@@ -7,6 +17,13 @@ import torch
 from openml_pytorch.metrics import accuracy
 from openml_pytorch.trainer import convert_to_rgb
 from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
+
+run = openml.runs.get_run(10595300)
+@pytest.fixture
+def setup_run():
+    global run
+    run = openml.runs.get_run(10595300)
+    return run
 
 @pytest.fixture
 def setup_data_module():
@@ -50,30 +67,21 @@ def setup_trainer(setup_data_module):
     op.config.trainer = trainer
     return trainer
 
-@pytest.fixture
-def setup_task():
-    return openml.tasks.get_task(363465)
+def test_add_file_to_run():
+    global run   
+    run._get_file_elements = MagicMock(return_value={})
+    file_content = "sample content"
+    run = add_file_to_run(run, file_content, "test_file")
+    assert "test_file" in run._get_file_elements()
 
-def test_custom_scheduler(setup_trainer):
-    """
-    Test the custom learning rate scheduler.
-    """
-    # Check if the scheduler is set correctly
-    setup_trainer.lr_scheduler = torch.optim.lr_scheduler.StepLR
-    setup_trainer.lr_scheduler_kwargs = {"step_size": 1, "gamma": 0.1}
-    assert setup_trainer.lr_scheduler == torch.optim.lr_scheduler.StepLR
-    assert setup_trainer.lr_scheduler_kwargs == {"step_size": 1, "gamma": 0.1}
+def test_add_file_to_run_raises_type_error():
+    global run   
+    with pytest.raises(TypeError):
+        add_file_to_run(run, Path("/some/path"), "test_file")
 
-def test_custom_optimizer(setup_trainer):
-    """
-    Test the custom optimizer.
-    """
-    # Check if the optimizer is set correctly
-    setup_trainer.opt = torch.optim.AdamW
-    setup_trainer.opt_kwargs = {"lr": 1e-3, "weight_decay": 1e-4}
-    assert setup_trainer.opt == torch.optim.AdamW
-    assert setup_trainer.opt_kwargs == {"lr": 1e-3, "weight_decay": 1e-4}
-
-def test_if_custom_callbacks_are_added(setup_trainer):
-    setup_trainer.callbacks = [op.callbacks.TestCallback]
-    assert setup_trainer.cbfs[-1].__name__ == "TestCallback"
+def test_safe_add(setup_trainer):
+    trainer = setup_trainer
+    trainer.data_module = "value"
+    attribute_dict = {}
+    safe_add(attribute_dict, trainer, "data_module", "key")
+    assert attribute_dict["key"] == "value"
