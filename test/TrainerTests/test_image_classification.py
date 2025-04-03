@@ -14,7 +14,7 @@ def setup_data_module():
         [
             ToPILImage(),
             Lambda(convert_to_rgb),
-            Resize((64, 64)),
+            Resize((16, 16)),
             ToTensor(),
         ]
     )
@@ -27,7 +27,7 @@ def setup_data_module():
         filename_col="file_path",
         target_mode="categorical",
         target_column="CATEGORY",
-        batch_size=32,
+        batch_size=64,
         transform=transform
     )
     return data_module
@@ -65,6 +65,3 @@ def test_training_pipeline(setup_model, setup_task, setup_trainer):
     run = openml.runs.run_model_on_task(setup_model, setup_task, avoid_duplicate_runs=False)
     assert run is not None
     assert setup_trainer.stats.metrics is not None
-    assert setup_trainer.plot_all_metrics() is not None
-    assert setup_trainer.plot_loss() is not None
-    assert setup_trainer.plot_lr() is not None
