@@ -316,6 +316,7 @@ class OpenMLDataModule:
         transform=None,
         transform_test=None,
         target_column="encoded_labels",
+        subset_percent=None,
         **kwargs,
     ):
         self.config_gen = DefaultConfigGenerator()
@@ -325,6 +326,7 @@ class OpenMLDataModule:
         self.data_config.file_dir = file_dir
         self.data_config.target_mode = target_mode
         self.data_config.target_column = target_column
+        self.data_config.subset_percent = subset_percent
         self.handler: BaseDataHandler | None = data_handlers.get(type_of_data)
 
         if transform is not None:
@@ -412,6 +414,7 @@ class OpenMLDataModule:
         X_train_train, X_val, y_train_train, y_val = train_test_split(
             X_train,
             y_train,
+            train_size=self.data_config.subset_percent,
             test_size=self.data_config.validation_split,
             shuffle=True,
             stratify=y_train,
@@ -557,7 +560,6 @@ class OpenMLTrainerModule:
         opt: Callable = torch.optim.AdamW,
         opt_kwargs: dict = {"lr": 3e-4, "weight_decay": 1e-4},
         loss_fn: Callable = torch.nn.CrossEntropyLoss,
-        loss_fn_kwargs: dict = {},
         callbacks: List[Callback] = [],
         use_tensorboard: bool = True,
         metrics: List[Callable] = [],
@@ -579,9 +581,8 @@ class OpenMLTrainerModule:
         self.config.__dict__.update(kwargs)
         self.config.opt = opt
         self.config.opt_kwargs = opt_kwargs
-        self.config.loss_fn_kwargs = loss_fn_kwargs
         if loss_fn is not None:
-            self.loss_fn = loss_fn(**self.config.loss_fn_kwargs)
+            self.loss_fn = loss_fn()
         self.config.progress_callback = self._default_progress_callback
         self.logger: logging.Logger = logging.getLogger(__name__)
 
@@ -596,6 +597,7 @@ class OpenMLTrainerModule:
                 log_dir=f"tensorboard_logs/{experiment_name}/{timestamp}",
             )
 
+        # self.callbacks.append(LoggingCallback(self.logger, print_output=False))
         self.loss = 0
         self.training_state = True
 

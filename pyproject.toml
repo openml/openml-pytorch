@@ -1,6 +1,6 @@
 [project]
 name = "openml-pytorch"
-version = "0.1.6"
+version = "0.1.7"
 description = "Pytorch extension for OpenML"
 authors = [
     {name = "SubhadityaMukherjee", email = "msubhaditya@gmail.com"},
