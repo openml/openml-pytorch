@@ -557,6 +557,7 @@ class OpenMLTrainerModule:
         opt: Callable = torch.optim.AdamW,
         opt_kwargs: dict = {"lr": 3e-4, "weight_decay": 1e-4},
         loss_fn: Callable = torch.nn.CrossEntropyLoss,
+        loss_fn_kwargs: dict = {},
         callbacks: List[Callback] = [],
         use_tensorboard: bool = True,
         metrics: List[Callable] = [],
@@ -578,8 +579,9 @@ class OpenMLTrainerModule:
         self.config.__dict__.update(kwargs)
         self.config.opt = opt
         self.config.opt_kwargs = opt_kwargs
+        self.config.loss_fn_kwargs = loss_fn_kwargs
         if loss_fn is not None:
-            self.loss_fn = loss_fn()
+            self.loss_fn = loss_fn(**self.config.loss_fn_kwargs)
         self.config.progress_callback = self._default_progress_callback
         self.logger: logging.Logger = logging.getLogger(__name__)
 
@@ -594,7 +596,6 @@ class OpenMLTrainerModule:
                 log_dir=f"tensorboard_logs/{experiment_name}/{timestamp}",
             )
 
-        # self.callbacks.append(LoggingCallback(self.logger, print_output=False))
         self.loss = 0
         self.training_state = True
 
