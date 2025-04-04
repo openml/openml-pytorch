@@ -2,6 +2,7 @@
 ## 0.1.8
 - Fixed uploading large models to OpenML due to XML size limits in the flow
 - Added support for num_workers in dataloaders
+- Class weighting example
 ## 0.1.7, 3/04/25
 - Switched to poetry
 - Colab installation Fixed
