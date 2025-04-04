@@ -326,11 +326,7 @@ class PytorchExtension(Extension):
         else:
             # rval = str(o)
             # Store saying its unsupported
-            rval = OrderedDict(
-                (
-                    ("oml-python:serialized_object", "unsupported"),
-                )
-            )
+            rval = OrderedDict((("oml-python:serialized_object", "unsupported"),))
             print(
                 "While layers of this type are not officially supported yet, we will try to serialize them anyway."
             )

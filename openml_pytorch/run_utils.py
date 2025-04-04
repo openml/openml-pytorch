@@ -6,6 +6,7 @@ from typing import Any
 from urllib.request import urlretrieve
 import netron
 import torch
+from subprocess import run
 
 def add_file_to_run(run, file: Any, name: str = "onnx_model") -> None:
     """
@@ -88,6 +89,9 @@ def add_experiment_info_to_run(run, trainer, upload_model=False):
 
     # Add loss plots to the run
     run = add_loss_plots_to_run(run, trainer)
+
+    # Add pip freeze
+    # run = add_pip_freeze(run)
 
     # Add torch model to the run
     if upload_model:
@@ -178,8 +182,9 @@ def add_onnx_model_to_run(run, trainer):
         print("No ONNX model found")
     return run
 
+
 def add_torch_model_to_run(run, trainer):
-    """"
+    """ "
     Add torch model to the run object
     if model.pth exists create model_1.pth and increment the number of the file
     """
@@ -201,3 +206,21 @@ def get_onnx_model_from_run_id(run_id):
     )
     file_path, _ = urlretrieve(url, "./model.onnx")
     netron.start(file_path, browse=False)
+
+
+def add_pip_freeze(run):
+    """
+        Add a pip freeze
+    """
+    data = run("pip freeze", capture_output=True, text=True)
+    total_output = data.stdout
+    try:
+        with open("reqs.txt", "r") as f:
+            f.write(str(total_output))
+        run = add_file_to_run(run, open("reqs.txt","r"), "requirements.txt")
+        os.unlink("reqs.txt")
+
+    except Exception as e:
+        print(f"Error adding lrs to run: {e}")
+    return run
+

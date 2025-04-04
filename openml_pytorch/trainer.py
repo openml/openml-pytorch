@@ -757,7 +757,9 @@ class OpenMLTrainerModule:
                     # then we need to add a column full of zeros into the probabilities
                     # for class 3 because the rest of the library expects that the
                     # probabilities are ordered the same way as the classes are ordered).
-                    print("The size of the tensor of predicted probabilities does not match the number of classes. Check the shape of the output of your model.")
+                    print(
+                        "The size of the tensor of predicted probabilities does not match the number of classes. Check the shape of the output of your model."
+                    )
                     proba_y_new = np.zeros((proba_y.shape[0], len(task.class_labels)))
                     for idx, model_class in enumerate(model_classes):
                         proba_y_new[:, model_class] = proba_y[:, idx]
