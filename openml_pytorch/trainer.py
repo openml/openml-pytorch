@@ -316,6 +316,7 @@ class OpenMLDataModule:
         transform=None,
         transform_test=None,
         target_column="encoded_labels",
+        num_workers=0,
         **kwargs,
     ):
         self.config_gen = DefaultConfigGenerator()
@@ -326,6 +327,7 @@ class OpenMLDataModule:
         self.data_config.target_mode = target_mode
         self.data_config.target_column = target_column
         self.handler: BaseDataHandler | None = data_handlers.get(type_of_data)
+        self.num_workers = num_workers
 
         if transform is not None:
             self.data_config.transform = transform
@@ -380,10 +382,10 @@ class OpenMLDataModule:
         )
 
         train_loader = DataLoader(
-            train, batch_size=self.data_config.batch_size, shuffle=True
+            train, batch_size=self.data_config.batch_size, shuffle=True, num_workers=self.num_workers
         )
         val_loader = DataLoader(
-            val, batch_size=self.data_config.batch_size, shuffle=False
+            val, batch_size=self.data_config.batch_size, shuffle=False, num_workers=self.num_workers
         )
 
         return train_loader, val_loader
