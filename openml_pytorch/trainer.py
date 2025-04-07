@@ -317,6 +317,7 @@ class OpenMLDataModule:
         transform_test=None,
         target_column="encoded_labels",
         num_workers=0,
+        batch_size = 64,
         **kwargs,
     ):
         self.config_gen = DefaultConfigGenerator()
@@ -326,6 +327,7 @@ class OpenMLDataModule:
         self.data_config.file_dir = file_dir
         self.data_config.target_mode = target_mode
         self.data_config.target_column = target_column
+        self.data_config.batch_size = batch_size
         self.handler: BaseDataHandler | None = data_handlers.get(type_of_data)
         self.num_workers = num_workers
 
