@@ -54,6 +54,14 @@ def patched_module(monkeypatch, mock_handler, mock_config):
 def test_init_sets_config_correctly(patched_module):
     assert patched_module.data_config.type_of_data == "image"
     assert patched_module.handler is not None
+    assert isinstance(patched_module.filename_col, str)
+    assert isinstance(patched_module.file_dir, str)
+    assert isinstance(patched_module.target_mode, str)
+    assert patched_module.transform is None
+    assert patched_module.transform_test is None
+    assert isinstance(patched_module.target_column, str)
+    assert isinstance(patched_module.num_workers, int)
+    assert isinstance(patched_module.batch_size, int)
 
 
 def test_split_training_data(patched_module, dummy_data):
