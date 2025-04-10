@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 from openml_pytorch.callbacks.annealing import sched_cos, sched_lin, sched_no, sched_exp
 from functools import partial
 
+
 class TestAnnealer(unittest.TestCase):
     def __init__(self, methodName: str = "runTest") -> None:
         super().__init__(methodName)
@@ -15,7 +16,7 @@ class TestAnnealer(unittest.TestCase):
         expected = 0.6
         scheduler = sched_lin(self.start, self.end)
         assert expected == scheduler(pos)
-    
+
     def test_sched_cos(self):
         pos = 0.6
         expected = 0.6545084971874737
@@ -32,4 +33,4 @@ class TestAnnealer(unittest.TestCase):
         pos = 0.6
         expected = 0.009999999999999997
         scheduler = sched_exp(self.start, self.end)
-        assert expected == scheduler(pos) 
+        assert expected == scheduler(pos)

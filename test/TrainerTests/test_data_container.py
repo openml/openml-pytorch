@@ -5,6 +5,7 @@ import pytest
 from openml_pytorch.trainer import DataContainer
 from torch.utils.data import DataLoader, TensorDataset
 
+
 @pytest.fixture
 def dummy_dataloaders():
     # Create dummy datasets
@@ -19,6 +20,7 @@ def dummy_dataloaders():
 
     return train_dl, val_dl, test_dl
 
+
 def test_data_container_with_test(dummy_dataloaders):
     train_dl, val_dl, test_dl = dummy_dataloaders
     container = DataContainer(train_dl, val_dl, test_dl)
@@ -30,6 +32,7 @@ def test_data_container_with_test(dummy_dataloaders):
     assert container.train_ds is train_dl.dataset
     assert container.valid_ds is val_dl.dataset
     assert container.test_ds is test_dl.dataset
+
 
 def test_data_container_without_test(dummy_dataloaders):
     train_dl, val_dl, _ = dummy_dataloaders

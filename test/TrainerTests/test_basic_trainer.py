@@ -60,7 +60,9 @@ def test_fit_runs(trainer):
     assert len(trainer.losses["test"]) > 0
 
 
-def test_missing_train_loader_raises(dummy_model, dummy_loss_fn, dummy_optimizer, simple_data):
+def test_missing_train_loader_raises(
+    dummy_model, dummy_loss_fn, dummy_optimizer, simple_data
+):
     trainer = BasicTrainer(
         model=dummy_model,
         loss_fn=dummy_loss_fn,
@@ -73,7 +75,9 @@ def test_missing_train_loader_raises(dummy_model, dummy_loss_fn, dummy_optimizer
         trainer.fit(epochs=1)
 
 
-def test_missing_test_loader_raises(dummy_model, dummy_loss_fn, dummy_optimizer, simple_data):
+def test_missing_test_loader_raises(
+    dummy_model, dummy_loss_fn, dummy_optimizer, simple_data
+):
     trainer = BasicTrainer(
         model=dummy_model,
         loss_fn=dummy_loss_fn,

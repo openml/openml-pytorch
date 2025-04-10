@@ -2,7 +2,11 @@ import pytest
 from unittest.mock import MagicMock
 
 # Assuming the callbacks are in a module named `callbacks`
-from openml_pytorch.callbacks.training_callbacks import TrainEvalCallback, TestCallback, CancelTrainException
+from openml_pytorch.callbacks.training_callbacks import (
+    TrainEvalCallback,
+    TestCallback,
+    CancelTrainException,
+)
 
 
 class DummyModel:

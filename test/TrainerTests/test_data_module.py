@@ -3,24 +3,29 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import numpy as np
 from torch.utils.data import DataLoader
-from openml_pytorch.trainer import OpenMLDataModule, DataContainer  # Adjust as needed
+from openml_pytorch.trainer import OpenMLDataModule, DataContainer, BaseDataHandler
+
 
 @pytest.fixture
 def dummy_data():
-    X = pd.DataFrame({
-        "Filename": [f"img_{i}.png" for i in range(100)],
-        "feature1": np.random.randn(100)
-    })
+    X = pd.DataFrame(
+        {
+            "Filename": [f"img_{i}.png" for i in range(100)],
+            "feature1": np.random.randn(100),
+        }
+    )
     y = pd.Series(np.random.choice(["cat", "dog"], size=100))
     return X, y
 
 
 @pytest.fixture
 def dummy_test_data():
-    return pd.DataFrame({
-        "Filename": [f"img_{i}.png" for i in range(20)],
-        "feature1": np.random.randn(20)
-    })
+    return pd.DataFrame(
+        {
+            "Filename": [f"img_{i}.png" for i in range(20)],
+            "feature1": np.random.randn(20),
+        }
+    )
 
 
 @pytest.fixture
@@ -41,7 +46,7 @@ def mock_config(monkeypatch):
         filename_col="Filename",
         file_dir="images",
         target_mode="categorical",
-        target_column="encoded_labels"
+        target_column="encoded_labels",
     )
     monkeypatch.setattr("openml_pytorch.trainer.DefaultConfigGenerator", lambda: mock)
 
@@ -52,16 +57,23 @@ def patched_module(monkeypatch, mock_handler, mock_config):
 
 
 def test_init_sets_config_correctly(patched_module):
+    assert patched_module.handler is not None
+    assert patched_module.config_gen is not None
+    assert isinstance(patched_module.num_workers, int)
+    assert isinstance(patched_module.data_config.batch_size, int)
+    assert isinstance(patched_module.handler, BaseDataHandler)
+
+
+def test_init_sets_data_config_correctly(patched_module):
     assert patched_module.data_config.type_of_data == "image"
     assert patched_module.handler is not None
-    assert isinstance(patched_module.filename_col, str)
-    assert isinstance(patched_module.file_dir, str)
-    assert isinstance(patched_module.target_mode, str)
-    assert patched_module.transform is None
-    assert patched_module.transform_test is None
-    assert isinstance(patched_module.target_column, str)
-    assert isinstance(patched_module.num_workers, int)
-    assert isinstance(patched_module.batch_size, int)
+    assert patched_module.config_gen is not None
+    assert isinstance(patched_module.data_config.filename_col, str)
+    assert isinstance(patched_module.data_config.file_dir, str)
+    assert isinstance(patched_module.data_config.target_mode, str)
+    assert patched_module.data_config.transform is not None
+    assert patched_module.data_config.transform_test is not None
+    assert isinstance(patched_module.data_config.target_column, str)
 
 
 def test_split_training_data(patched_module, dummy_data):
@@ -83,10 +95,12 @@ def test_encode_labels(patched_module, dummy_data):
 def test_get_data_calls_handlers_correctly(patched_module, dummy_data, dummy_test_data):
     X, y = dummy_data
     X_test = dummy_test_data
-    
+
     # Patch DataLoader to prevent instantiation errors
     with patch("openml_pytorch.trainer.DataLoader", return_value="dataloader"):
-        data_container, model_classes = patched_module.get_data(X, y, X_test, task="classification")
+        data_container, model_classes = patched_module.get_data(
+            X, y, X_test, task="classification"
+        )
 
     assert isinstance(data_container, DataContainer)
     assert model_classes is not None
