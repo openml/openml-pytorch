@@ -173,7 +173,7 @@ class DefaultConfigGenerator:
             # epoch_count represents the number of epochs the model should be trained for
             epoch_count=3,  # type: int,
             verbose=True,
-            schduler=None,
+            scheduler=None,
             opt_kwargs={},
             scheduler_kwargs={},
         )
@@ -427,6 +427,8 @@ class OpenMLDataModule:
 
 class ModelRunner:
     def __init__(self, cbs=None, cb_funcs=None):
+        self.epoch = 0
+        self.in_train = False
         cbs = listify(cbs)
         for cbf in listify(cb_funcs):
             cb = cbf()
@@ -449,10 +451,6 @@ class ModelRunner:
     @property
     def data(self):
         return self.learn.data
-
-    @property
-    def label_mapping(self):
-        return self.learn.label_mapping
 
     @property
     def model_classes(self):
@@ -527,7 +525,7 @@ class Learner:
     """
 
     def __init__(
-        self, model, opt, loss_fn, scheduler, data, model_classes, device="cpu"
+        self, model, opt, loss_fn, scheduler, data, model_classes, device=torch.device("cpu")
     ):
         (
             self.model,
@@ -611,7 +609,6 @@ class OpenMLTrainerModule:
         self.cbfs = [
             Recorder,
             partial(AvgStatsCallback, self.metrics),
-            # partial(ParamScheduler, "lr", self.scheds),
             partial(PutDataOnDeviceCallback, self.config.device),
         ]
         if self.tensorboard_writer is not None:
@@ -796,7 +793,7 @@ class OpenMLTrainerModule:
                 self.loss_fn = self.config.loss_fn(task)
             self.device = self.config.device
 
-            if self.config.device != "cpu":
+            if self.config.device != torch.device("cpu"):
                 self.loss_fn = self.loss_fn.to(self.config.device)
 
             self.data, self.model_classes = self.data_module.get_data(

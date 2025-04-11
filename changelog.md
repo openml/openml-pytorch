@@ -4,6 +4,8 @@
 - Added support for num_workers in dataloaders
 - Class weighting example
 - Fixed batch size bug 
+- Fixed some small inconsistencies in the code
+- Fixed learner device str instead of torch.device (did not affect any actual results)
 ## 0.1.7, 3/04/25
 - Switched to poetry
 - Colab installation Fixed

@@ -47,6 +47,8 @@ def sched_exp(start: float, end: float, pos: float) -> float:
     """
     Exponential schedule function.
     """
+    if start == 0.0:
+        start = 0.00001
     return start * (end / start) ** pos
 
 
