@@ -6,6 +6,8 @@
 - Fixed batch size bug 
 - Fixed some small inconsistencies in the code
 - Fixed learner device str instead of torch.device (did not affect any actual results)
+- Removed some numpy and other bottlenecks for evaluation
+- Added automatic tests on python versions above 3.9
 ## 0.1.7, 3/04/25
 - Switched to poetry
 - Colab installation Fixed
