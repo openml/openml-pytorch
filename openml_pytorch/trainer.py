@@ -77,38 +77,40 @@ class DefaultConfigGenerator:
             return torch.nn.CrossEntropyLoss()
         else:
             raise ValueError(task)
-
+        
     @staticmethod
     def _default_predict(output: torch.Tensor, task: OpenMLTask) -> torch.Tensor:
         """
-        _default_predict turns the outputs into predictions by returning the argmax of the output tensor for classification tasks, and by flattening the prediction in case of the regression
+        Converts model outputs to predicted labels.
+        For classification: uses argmax.
+        For regression: flattens output.
         """
-        output_axis = output.dim() - 1
         if isinstance(task, OpenMLClassificationTask):
-            output = torch.argmax(output, dim=output_axis)
+            return torch.argmax(output, dim=-1)
         elif isinstance(task, OpenMLRegressionTask):
-            output = output.view(-1)
+            return output.view(-1)
         else:
-            raise ValueError(task)
-        return output
+            raise ValueError(f"Unsupported task type: {type(task)}")
 
     @staticmethod
     def _default_predict_proba(output: torch.Tensor, task: OpenMLTask) -> torch.Tensor:
         """
-        _default_predict_proba turns the outputs into probabilities using softmax
+        Converts model outputs to probabilities using softmax.
         """
-        output_axis = output.dim() - 1
-        output = output.softmax(dim=output_axis)
-        return output
+        if not isinstance(task, OpenMLClassificationTask):
+            raise ValueError("predict_proba is only valid for classification tasks")
+        
+        return torch.nn.functional.softmax(output, dim=-1)
 
     @staticmethod
     def _default_sanitize(tensor: torch.Tensor) -> torch.Tensor:
         """
-        _default sanitizer replaces NaNs with 1e-6
+        Replaces NaNs with 1e-6 in-place if possible.
         """
-        tensor = torch.where(
-            torch.isnan(tensor), torch.ones_like(tensor) * torch.tensor(1e-6), tensor
-        )
+        nan_mask = torch.isnan(tensor)
+        if nan_mask.any():
+            tensor = tensor.clone()  # clone only if modification is needed
+            tensor[nan_mask] = 1e-6
         return tensor
 
     @staticmethod
@@ -366,7 +368,7 @@ class OpenMLDataModule:
     def process_test_data(self, X_test):
         test = self.handler.prepare_test_data(X_test, self.data_config)
         test_loader = DataLoader(
-            test, batch_size=self.data_config.batch_size, shuffle=False
+            test, batch_size=self.data_config.batch_size, shuffle=False, num_workers = self.num_workers 
         )
 
         return test_loader
@@ -693,91 +695,168 @@ class OpenMLTrainerModule:
     def check_config(self):
         raise NotImplementedError
 
-    def _prediction_to_probabilities(
-        self, y: np.ndarray, classes: List[Any]
-    ) -> np.ndarray:
-        """Transforms predicted probabilities to match with OpenML class indices.
-
-        Parameters
-        ----------
-        y : np.ndarray
-            Predicted probabilities (possibly omitting classes if they were not present in the
-            training data).
-        model_classes : list
-            List of classes known_predicted by the model, ordered by their index.
-
-        Returns
-        -------
-        np.ndarray
+    def _prediction_to_probabilities(self, y: np.ndarray, classes: List[Any]) -> np.ndarray:
         """
-        # y: list or numpy array of predictions
-        # model_classes: mapping from original array id to
-        # prediction index id
+        Converts predicted class indices into one-hot probability vectors matching OpenML class indices.
+        """
         if not isinstance(classes, list):
-            raise ValueError(
-                "please convert model classes to list prior to calling this fn"
-            )
-        result = np.zeros((len(y), len(classes)), dtype=np.float32)
-        for obs, prediction_idx in enumerate(y):
-            result[obs][prediction_idx] = 1.0
-        return result
+            raise ValueError("Please convert model classes to list prior to calling this function.")
 
+        n_samples = len(y)
+        n_classes = len(classes)
+        
+        # Ensure y is an integer array
+        y = np.asarray(y, dtype=np.int64)
+        
+        result = np.zeros((n_samples, n_classes), dtype=np.float32)
+        result[np.arange(n_samples), y] = 1.0  # vectorized one-hot assignment
+        return result
+    
     def run_evaluation(self, task, data, model_classes):
-        if isinstance(task, OpenMLSupervisedTask):
-            self.model.eval()
-            pred_y = self.pred_test(task, self.model, data.test_dl, self.config.predict)
-        else:
+        if not isinstance(task, OpenMLSupervisedTask):
             raise ValueError(task)
 
-        if isinstance(task, OpenMLClassificationTask):
-            try:
-                self.model.eval()
-                proba_y = self.pred_test(
-                    task, self.model, data.test_dl, self.config.predict_proba
-                )
+        self.model.eval()
+        with torch.no_grad():
 
-            except AttributeError:
-                if task.class_labels is not None:
-                    proba_y = self._prediction_to_probabilities(
-                        pred_y, list(task.class_labels)
-                    )
-                else:
-                    raise ValueError("The task has no class labels")
+            # Run inference once
+            logits = self.pred_test(task, self.model, data.test_dl, lambda x, _: x)
 
-            if task.class_labels is not None:
-                if proba_y.shape[1] != len(task.class_labels):
-                    # Remap the probabilities in case there was a class missing
-                    # at training time. By default, the classification targets
-                    # are mapped to be zero-based indices to the actual classes.
-                    # Therefore, the model_classes contain the correct indices to
-                    # the correct probability array. Example:
-                    # classes in the dataset: 0, 1, 2, 3, 4, 5
-                    # classes in the training set: 0, 1, 2, 4, 5
-                    # then we need to add a column full of zeros into the probabilities
-                    # for class 3 because the rest of the library expects that the
-                    # probabilities are ordered the same way as the classes are ordered).
-                    print("The size of the tensor of predicted probabilities does not match the number of classes. Check the shape of the output of your model.")
+            # Get predictions
+            pred_y = self.config.predict(torch.from_numpy(logits), task).numpy()
+
+            proba_y = None
+            if isinstance(task, OpenMLClassificationTask):
+                try:
+                    proba_y = self.config.predict_proba(torch.from_numpy(logits), task).numpy()
+                except AttributeError:
+                    if task.class_labels is None:
+                        raise ValueError("The task has no class labels")
+                    proba_y = self._prediction_to_probabilities(pred_y, list(task.class_labels))
+
+                # Adjust shape if needed
+                if task.class_labels is not None and proba_y.shape[1] != len(task.class_labels):
+                    self.logger.warning("Mismatch in predicted probabilities and number of class labels.")
                     proba_y_new = np.zeros((proba_y.shape[0], len(task.class_labels)))
                     for idx, model_class in enumerate(model_classes):
-                        proba_y_new[:, model_class] = proba_y[:, idx]
+                        if model_class < proba_y_new.shape[1]:
+                            proba_y_new[:, model_class] = proba_y[:, idx]
                     proba_y = proba_y_new
 
-                if proba_y.shape[1] != len(task.class_labels):
-                    message = "Estimator only predicted for {}/{} classes!".format(
-                        proba_y.shape[1],
-                        len(task.class_labels),
-                    )
-                    warnings.warn(message)
-                    self.logger.warning(message)
+                    if proba_y.shape[1] != len(task.class_labels):
+                        message = f"Estimator only predicted for {proba_y.shape[1]}/{len(task.class_labels)} classes!"
+                        warnings.warn(message)
+                        self.logger.warning(message)
+
+            elif isinstance(task, OpenMLRegressionTask):
+                proba_y = None
             else:
-                raise ValueError("The task has no class labels")
+                raise TypeError(type(task))
 
-        elif isinstance(task, OpenMLRegressionTask):
-            proba_y = None
-
-        else:
-            raise TypeError(type(task))
+        print("Evaluation done")
         return pred_y, proba_y
+
+    
+    # def run_evaluation(self, task, data, model_classes):
+    #     if not isinstance(task, OpenMLSupervisedTask):
+    #         raise ValueError(task)
+
+    #     self.model.eval()
+
+    #     # Run prediction once, cache outputs
+    #     pred_y = self.pred_test(task, self.model, data.test_dl, self.config.predict)
+
+    #     proba_y = None
+    #     if isinstance(task, OpenMLClassificationTask):
+    #         # Try to get probabilities
+    #         try:
+    #             proba_y = self.pred_test(task, self.model, data.test_dl, self.config.predict_proba)
+    #         except AttributeError:
+    #             if task.class_labels is None:
+    #                 raise ValueError("The task has no class labels")
+    #             proba_y = self._prediction_to_probabilities(pred_y, list(task.class_labels))
+
+    #         # Adjust shape if needed
+    #         if task.class_labels is not None and proba_y.shape[1] != len(task.class_labels):
+    #             self.logger.warning("Mismatch in predicted probabilities and number of class labels.")
+    #             proba_y_new = np.zeros((proba_y.shape[0], len(task.class_labels)))
+    #             for idx, model_class in enumerate(model_classes):
+    #                 if model_class < proba_y_new.shape[1]:
+    #                     proba_y_new[:, model_class] = proba_y[:, idx]
+    #             proba_y = proba_y_new
+
+    #             if proba_y.shape[1] != len(task.class_labels):
+    #                 message = f"Estimator only predicted for {proba_y.shape[1]}/{len(task.class_labels)} classes!"
+    #                 warnings.warn(message)
+    #                 self.logger.warning(message)
+
+    #     elif isinstance(task, OpenMLRegressionTask):
+    #         proba_y = None
+
+    #     else:
+    #         raise TypeError(type(task))
+        
+    #     print("Evaluation done")
+
+    #     return pred_y, proba_y
+
+
+    # def run_evaluation(self, task, data, model_classes):
+    #     if isinstance(task, OpenMLSupervisedTask):
+    #         self.model.eval()
+    #         pred_y = self.pred_test(task, self.model, data.test_dl, self.config.predict)
+    #     else:
+    #         raise ValueError(task)
+
+    #     if isinstance(task, OpenMLClassificationTask):
+    #         try:
+    #             self.model.eval()
+    #             proba_y = self.pred_test(
+    #                 task, self.model, data.test_dl, self.config.predict_proba
+    #             )
+
+    #         except AttributeError:
+    #             if task.class_labels is not None:
+    #                 proba_y = self._prediction_to_probabilities(
+    #                     pred_y, list(task.class_labels)
+    #                 )
+    #             else:
+    #                 raise ValueError("The task has no class labels")
+
+    #         if task.class_labels is not None:
+    #             if proba_y.shape[1] != len(task.class_labels):
+    #                 # Remap the probabilities in case there was a class missing
+    #                 # at training time. By default, the classification targets
+    #                 # are mapped to be zero-based indices to the actual classes.
+    #                 # Therefore, the model_classes contain the correct indices to
+    #                 # the correct probability array. Example:
+    #                 # classes in the dataset: 0, 1, 2, 3, 4, 5
+    #                 # classes in the training set: 0, 1, 2, 4, 5
+    #                 # then we need to add a column full of zeros into the probabilities
+    #                 # for class 3 because the rest of the library expects that the
+    #                 # probabilities are ordered the same way as the classes are ordered).
+    #                 print("The size of the tensor of predicted probabilities does not match the number of classes. Check the shape of the output of your model.")
+    #                 proba_y_new = np.zeros((proba_y.shape[0], len(task.class_labels)))
+    #                 for idx, model_class in enumerate(model_classes):
+    #                     proba_y_new[:, model_class] = proba_y[:, idx]
+    #                 proba_y = proba_y_new
+
+    #             if proba_y.shape[1] != len(task.class_labels):
+    #                 message = "Estimator only predicted for {}/{} classes!".format(
+    #                     proba_y.shape[1],
+    #                     len(task.class_labels),
+    #                 )
+    #                 warnings.warn(message)
+    #                 self.logger.warning(message)
+    #         else:
+    #             raise ValueError("The task has no class labels")
+
+    #     elif isinstance(task, OpenMLRegressionTask):
+    #         proba_y = None
+
+    #     else:
+    #         raise TypeError(type(task))
+    #     return pred_y, proba_y
 
     def run_training(self, task, X_train, y_train, X_test):
         if isinstance(task, OpenMLSupervisedTask) or isinstance(
@@ -843,23 +922,53 @@ class OpenMLTrainerModule:
                     # replace the callback with the new one in the same position
                     self.cbfs[self.cbfs.index(callback)] = callback
 
-    def pred_test(self, task, model_copy, test_loader, predict_func):
-        probabilities = []
-        for batch_idx, inputs in enumerate(test_loader):
-            inputs = self.config.sanitize(inputs)
-            # if torch.cuda.is_available():
-            inputs = inputs.to(self.config.device)
+    # def pred_test(self, task, model_copy, test_loader, predict_func):
+    #     probabilities = []
+    #     for batch_idx, inputs in enumerate(test_loader):
+    #         inputs = self.config.sanitize(inputs)
+    #         # if torch.cuda.is_available():
+    #         inputs = inputs.to(self.config.device)
 
-            # Perform inference on the batch
-            pred_y_batch = model_copy(inputs)
-            pred_y_batch = predict_func(pred_y_batch, task)
-            pred_y_batch = pred_y_batch.cpu().detach().numpy()
+    #         # Perform inference on the batch
+    #         pred_y_batch = model_copy(inputs)
+    #         pred_y_batch = predict_func(pred_y_batch, task)
+    #         pred_y_batch = pred_y_batch.cpu().detach().numpy()
 
-            probabilities.append(pred_y_batch)
+    #         probabilities.append(pred_y_batch)
 
-            # Concatenate probabilities from all batches
-        pred_y = np.concatenate(probabilities, axis=0)
-        return pred_y
+    #         # Concatenate probabilities from all batches
+    #     pred_y = np.concatenate(probabilities, axis=0)
+    #     return pred_y
+    # def pred_test(self, task, model, test_loader, predict_func):
+    #     model.eval()
+    #     device = self.config.device
+    #     sanitize = self.config.sanitize
+
+    #     results = []
+    #     with torch.no_grad():
+    #         for batch in test_loader:
+    #             inputs = sanitize(batch).to(device)
+    #             outputs = model(inputs)
+    #             outputs = predict_func(outputs, task)
+    #             results.append(outputs.cpu().numpy())
+
+    #     return np.concatenate(results, axis=0)
+    def pred_test(self, task, model, test_loader, predict_func):
+        model.eval()
+        device = self.config.device
+        sanitize = self.config.sanitize
+
+        all_outputs = []
+
+        with torch.no_grad():
+            for batch in test_loader:
+                inputs = sanitize(batch).to(device)
+                outputs = model(inputs)
+                outputs = predict_func(outputs, task)
+                all_outputs.append(outputs.detach().cpu())  # keep as tensor
+
+        return torch.cat(all_outputs, dim=0).numpy()  # only convert once
+
 
 
 # Define a trainer
