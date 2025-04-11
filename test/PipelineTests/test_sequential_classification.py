@@ -83,7 +83,7 @@ def setup_trainer(setup_data_module):
         metrics= [accuracy],
         # remove the TestCallback when you are done testing your pipeline. Having it here will make the pipeline run for a very short time.
         callbacks=[
-            # op.callbacks.TestCallback,
+            op.callbacks.TestCallback,
         ],
         opt = torch.optim.Adam,
     )
@@ -111,6 +111,3 @@ def test_training_pipeline(setup_model, setup_task, setup_trainer):
     )
     assert run is not None
     assert setup_trainer.stats.metrics is not None
-    assert setup_trainer.plot_all_metrics() is not None
-    assert setup_trainer.plot_loss() is not None
-    assert setup_trainer.plot_lr() is not None

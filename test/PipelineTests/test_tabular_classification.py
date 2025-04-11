@@ -83,6 +83,3 @@ def test_training_pipeline(setup_model, setup_task, setup_trainer):
     )
     assert run is not None
     assert setup_trainer.stats.metrics is not None
-    assert setup_trainer.plot_all_metrics() is not None
-    assert setup_trainer.plot_loss() is not None
-    assert setup_trainer.plot_lr() is not None

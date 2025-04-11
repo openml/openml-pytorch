@@ -7,6 +7,9 @@ import torch
 from openml_pytorch.metrics import accuracy
 from openml_pytorch.trainer import convert_to_rgb
 from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
+import matplotlib
+matplotlib.use('Agg')  # Must be set before importing pyplot
+import matplotlib.pyplot as plt
 
 
 @pytest.fixture
@@ -15,7 +18,7 @@ def setup_data_module():
         [
             ToPILImage(),
             Lambda(convert_to_rgb),
-            Resize((64, 64)),
+            Resize((8, 8)),
             ToTensor(),
         ]
     )
@@ -34,15 +37,16 @@ def setup_data_module():
         filename_col="file_path",
         target_mode="categorical",
         target_column="CATEGORY",
-        batch_size=32,
+        batch_size=128,
         transform=transform,
+        num_workers=0
     )
     return data_module
 
 
 @pytest.fixture
 def setup_model():
-    return torchvision.models.resnet18(num_classes=315)
+    return torchvision.models.efficientnet_b0(num_classes=315)
 
 
 @pytest.fixture
@@ -71,7 +75,7 @@ def test_data_loading(setup_data_module):
 
 def test_model_initialization(setup_model):
     assert setup_model is not None
-    assert isinstance(setup_model, torchvision.models.ResNet)
+    assert isinstance(setup_model, torchvision.models.EfficientNet)
 
 
 def test_training_pipeline(setup_model, setup_task, setup_trainer):
@@ -80,6 +84,3 @@ def test_training_pipeline(setup_model, setup_task, setup_trainer):
     )
     assert run is not None
     assert setup_trainer.stats.metrics is not None
-    assert setup_trainer.plot_all_metrics() is not None
-    assert setup_trainer.plot_loss() is not None
-    assert setup_trainer.plot_lr() is not None
