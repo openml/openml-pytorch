@@ -1,0 +1,19 @@
+services:
+  openml-pytorch:
+    build: .
+    container_name: openml-pytorch
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - ./test:/workspace/test
+      - openml_cache:/root/.openml  # Persist OpenML cache
+    ports:
+      - "8888:8888"  # Jupyter Notebook
+      - "6006:6006"  # TensorBoard
+    environment:
+      - PYTHONPATH=/workspace
+    # Keep the container running
+    command: tail -f /dev/null
+
+volumes:
+  openml_cache:
