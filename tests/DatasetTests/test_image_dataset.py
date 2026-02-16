@@ -8,14 +8,13 @@ from openml_pytorch.custom_datasets import OpenMLImageDataset
 
 # Test class for OpenMLImageDataset
 class TestOpenMLImageDataset(unittest.TestCase):
-
     @patch("torchvision.io.read_image")  # Mock read_image function for testing
     def setUp(self, mock_read_image):
         # Setup mock data
         self.mock_X = pd.DataFrame({"image_name": ["img1.jpg", "img2.jpg"]})
         self.mock_y = pd.Series([0, 1])
         self.image_size = 64
-        self.image_dir = "test/images"
+        self.image_dir = "tests/images"
 
         # Mock the read_image function to return a dummy tensor
         mock_read_image.return_value = torch.zeros(
@@ -31,7 +30,7 @@ class TestOpenMLImageDataset(unittest.TestCase):
         # Test if the dataset is initialized properly
         self.assertEqual(len(self.dataset), 2)  # Two images in mock data
         self.assertEqual(self.dataset.image_size, 64)
-        self.assertEqual(self.dataset.image_dir, "test/images")
+        self.assertEqual(self.dataset.image_dir, "tests/images")
 
     def test_getitem_with_label(self):
         # Test __getitem__ with label transformation
