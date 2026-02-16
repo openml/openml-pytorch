@@ -1,34 +1,31 @@
-FROM python:3.11-slim
+FROM python:3.12-slim-bookworm
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONPATH="/workspace:${PYTHONPATH}" \
-    OPENML_CONFIG_DIR="/root/.openml"
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/workspace \
+    OPENML_CONFIG_DIR=/home/appuser/.openml
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        ca-certificates \
+    && update-ca-certificates \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PyTorch with CUDA 12.1
-RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+ENV PATH="/root/.local/bin:$PATH"
 
-# Set working directory
+RUN useradd -m appuser
+
 WORKDIR /workspace
 
-# Copy requirements first to leverage Docker cache
-COPY requirements.txt .
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt pytest
-
-# Copy the rest of the project
 COPY . .
+RUN chown -R appuser:appuser /workspace
 
-# Install in development mode
-RUN pip install --no-cache-dir -e .
-
-RUN useradd -m appuser && chown -R appuser:appuser /workspace
 USER appuser
 
 CMD ["bash"]
+

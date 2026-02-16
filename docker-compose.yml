@@ -6,14 +6,14 @@ services:
     volumes:
       - .:/workspace
       - ./test:/workspace/test
-      - openml_cache:/root/.openml  # Persist OpenML cache
+      - openml_cache:/home/appuser/.openml
     ports:
-      - "8888:8888"  # Jupyter Notebook
-      - "6006:6006"  # TensorBoard
+      - "8888:8888"
+      - "6006:6006"
     environment:
       - PYTHONPATH=/workspace
-    # Keep the container running
     command: tail -f /dev/null
 
 volumes:
   openml_cache:
+
