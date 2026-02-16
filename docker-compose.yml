@@ -1,0 +1,19 @@
+services:
+  openml-pytorch:
+    build: .
+    container_name: openml-pytorch
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - ./test:/workspace/test
+      - openml_cache:/home/appuser/.openml
+    ports:
+      - "8888:8888"
+      - "6006:6006"
+    environment:
+      - PYTHONPATH=/workspace
+    command: tail -f /dev/null
+
+volumes:
+  openml_cache:
+
