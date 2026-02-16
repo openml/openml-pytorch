@@ -4,37 +4,6 @@ Pytorch extension for [openml-python API](https://github.com/openml/openml-pytho
 
 For a more native experience, PyTorch itself provides OpenML integrations for some tasks. You can find more information [here](<Integrations of OpenML in PyTorch.md>).
 
-## Docker Setup (Recommended)
-
-For easy setup and consistent environment, we provide a Docker configuration:
-
-```bash
-# Clone the repository
-git clone https://github.com/openml/openml-pytorch.git
-cd openml-pytorch
-
-# Build and start the container
-docker-compose up -d --build
-
-# Run tests to verify the setup
-docker-compose exec openml-pytorch python -m pytest test/
-
-# Access the container shell
-docker-compose exec openml-pytorch bash
-
-# Run a Python script inside the container
-docker-compose exec openml-pytorch python your_script.py
-
-# Stop the container when done
-docker-compose down
-```
-
-### Docker Features
-- Pre-configured with all dependencies
-- Jupyter Notebook support at `http://localhost:8888`
-- TensorBoard support at `http://localhost:6006`
-- Persistent OpenML cache between container restarts
-
 ## Installation Instructions:
 
 <!-- `pip install openml-pytorch` -->
@@ -207,3 +176,34 @@ openml.config.apikey = ''
 run = op.add_experiment_info_to_run(run=run, trainer=trainer) 
 run.publish()
 ```
+
+## Docker Setup
+
+For easy setup and consistent environment, we provide a Docker configuration:
+
+```bash
+# Clone the repository
+git clone https://github.com/openml/openml-pytorch.git
+cd openml-pytorch
+
+# Build and start the container
+docker-compose up -d --build
+
+# Run tests to verify the setup
+docker-compose exec openml-pytorch python -m pytest test/
+
+# Access the container shell
+docker-compose exec openml-pytorch bash
+
+# Run a Python script inside the container
+docker-compose exec openml-pytorch python your_script.py
+
+# Stop the container when done
+docker-compose down
+```
+
+### Docker Features
+- Pre-configured with all dependencies
+- Jupyter Notebook support at `http://localhost:8888`
+- TensorBoard support at `http://localhost:6006`
+- Persistent OpenML cache between container restarts
