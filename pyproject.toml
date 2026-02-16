@@ -1,72 +1,25 @@
 [project]
 name = "openml-pytorch"
-version = "0.1.6"
+version = "0.1.8"
 description = "Pytorch extension for OpenML"
 authors = [
     {name = "SubhadityaMukherjee", email = "msubhaditya@gmail.com"},
-    {name = "Taniya Das", email = "t.das@tue.nl"}
 ]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-  "liac-arff>=2.4.0",
-  "minio",
-  "numpy>=1.6.2",
-  "packaging",
-  "pandas>=1.0.0",
-  "pyarrow",
-  "python-dateutil",  # Installed through pandas anyway.
-  "requests",
-  "scikit-learn>=0.18",
-  "scipy>=0.13.3",
-  "tqdm",  # For MinIO download progress bars
-  "xmltodict",
-  "torch>=2.2.0",
-  "torchvision>=0.20.0",
-  "onnx>=1.17.0",
-  "matplotlib>3.10",
-  "openml>=0.15.1",
-  "netron>=8.2.1",
-  "tqdm>=4.67.1",
-  "tensorboard>=2.18.0",
+    "matplotlib>=3.10.8",
+    "minio>=7.2.20",
+    "netron>=8.9.0",
+    "numpy>=2.4.2",
+    "onnx>=1.20.1",
+    "onnxscript>=0.6.2",
+    "openml>=0.15.1",
+    "pandas>=3.0.0",
+    "pytest>=9.0.2",
+    "scikit-learn>=1.8.0",
+    "tensorboard>=2.20.0",
+    "torch>=2.10.0",
+    "torchvision>=0.25.0",
+    "tqdm>=4.67.3",
 ]
-# dependencies = [
-#     "torch (>=2.4.0,<3.0.0)",
-#     "torchvision (>=0.20.0,<0.22.0)",
-#     "onnx (>=1.17.0,<2.0.0)",
-#     "numpy (>=2.2.0,<3.0.0)",
-#     "matplotlib (>=3.10,<4.0.0)",
-#     "netron (>=8.2.1,<9.0.0)",
-#     "openml (>=0.15.1,<0.16.0)",
-#     "tqdm (>=4.67.1,<5.0.0)",
-#     "scikit-learn (>=1.6.1,<2.0.0)",
-#     "scipy (>=1.15.2,<2.0.0)",
-#     "pandas (>=2.2.0,<3.0.0)",
-#     "tensorboard (>=2.18.0,<3.0.0)",
-#     "mknotebooks (>=0.8.0,<0.9.0)",
-#     "mkdocstrings-python (>=1.16.7,<2.0.0)",
-#     "mkdocs-redirects (>=1.2.2,<2.0.0)",
-#     "mkdocs-material (>=9.6.9,<10.0.0)",
-#     "mkdocs-jupyter (>=0.25.1,<0.26.0)",
-#     "mkdocs-awesome-pages-plugin (>=2.10.1,<3.0.0)",
-#     "mkdocs-autorefs (>=1.4.1,<2.0.0)"
-# ]
-#
-# [tool.poetry]
-# packages = [
-#     {include = "openml_pytorch"},
-#     {include = "openml_pytorch.callbacks"},
-#     {include = "openml_pytorch.custom_datasets"},
-#     {include = "openml_pytorch.layers"},
-# ]
-
-[tool.poetry.group.dev.dependencies]
-netron = "^8.2.1"
-tqdm = "^4.67.1"
-scikit-learn = "^1.6.1"
-scipy = "^1.15.2"
-pandas = "^2.2.3"
-
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"

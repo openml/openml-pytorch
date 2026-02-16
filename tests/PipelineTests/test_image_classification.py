@@ -8,7 +8,8 @@ from openml_pytorch.metrics import accuracy
 from openml_pytorch.trainer import convert_to_rgb
 from torchvision.transforms import Compose, Resize, ToPILImage, ToTensor, Lambda
 import matplotlib
-matplotlib.use('Agg')  # Must be set before importing pyplot
+
+matplotlib.use("Agg")  # Must be set before importing pyplot
 import matplotlib.pyplot as plt
 
 
@@ -39,7 +40,7 @@ def setup_data_module():
         target_column="CATEGORY",
         batch_size=128,
         transform=transform,
-        num_workers=0
+        num_workers=0,
     )
     return data_module
 
