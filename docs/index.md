@@ -1,27 +1,65 @@
 # Pytorch extension for OpenML python
 
-Pytorch extension for [openml-python API](https://github.com/openml/openml-python). This library provides a simple way to run your Pytorch models on OpenML tasks. 
+If you just want to use the datasets from OpenML and your custom training loop, you do not need to install this library, you can just use the given template. If you want to use OpenML for storing your ML artefacts etc, refer to the part after this template.
 
-For a more native experience, PyTorch itself provides OpenML integrations for some tasks. You can find more information [here](<Integrations of OpenML in PyTorch.md>).
+```python
+# Import libraries
+import openml
+import torch
+import numpy as np
+from sklearn.model_selection import train_test_split
+from typing import Any
+from tqdm import tqdm
 
-## Installation Instructions:
+class GenericDataset(torch.utils.data.Dataset):
+    """
+    Generic dataset that takes X,y as input and returns them as tensors"""
 
-<!-- `pip install openml-pytorch` -->
-While this project does exist on pypi, while everything is being finalized, it is recommended to install the package directly from the repository. 
+    def __init__(self, X, y):
+        self.X = torch.tensor(X, dtype=torch.float32)  # Convert to tensors
+        self.y = torch.tensor(y, dtype=torch.long)  # Ensure labels are LongTensor
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, idx):
+        return self.X[idx], self.y[idx]
+
+# Get dataset by ID and split into train and test
+dataset = openml.datasets.get_dataset(20)
+X, y, _, _ = dataset.get_data(target=dataset.default_target_attribute)
+X = X.to_numpy(dtype=np.float32)
+y = y.to_numpy(dtype=np.int64)
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=1, stratify=y)
+
+# Dataloaders
+ds_train = GenericDataset(X_train, y_train)
+ds_test = GenericDataset(X_test, y_test)
+dataloader_train = torch.utils.data.DataLoader(ds_train, batch_size=64, shuffle=True)
+dataloader_test = torch.utils.data.DataLoader(ds_test, batch_size=64, shuffle=False)
+
+# Your training code
+```
+
+This library is an extension built on top of the [openml-python API](https://github.com/openml/openml-python) which provides a simple way to run your PyTorch models on OpenML tasks. Sadly at the moment it is not possible to use arbitrary libraries such as PyTorch Lightning/fastai directly with OpenML due to certain limitations with the run upload API. This is being actively worked on but we cannot provide an exact timeline for the same.
+However, you can follow the instructions below to do the same. This uses a custom (fastai like) API that allows you to train/test/validate your models easily.
+
+## Installation Instructions
 
 ```bash
 pip install git+https://github.com/openml/openml-pytorch -U
 ```
 
-PyPi link https://pypi.org/project/openml-pytorch/
+## Usage
 
-Set the API key for OpenML from the command line:
+To upload any data to openml, you need to have logged in using the API -
+
 ```bash
 openml configure apikey <your API key>
 ```
 
-## Usage
 ### Load Data from OpenML and Train a Model
+
 ```python
 # Import libraries
 import openml
@@ -36,8 +74,8 @@ from openml_pytorch import GenericDataset
 # Get dataset by ID and split into train and test
 dataset = openml.datasets.get_dataset(20)
 X, y, _, _ = dataset.get_data(target=dataset.default_target_attribute)
-X = X.to_numpy(dtype=np.float32)  
-y = y.to_numpy(dtype=np.int64)    
+X = X.to_numpy(dtype=np.float32)
+y = y.to_numpy(dtype=np.int64)
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=1, stratify=y)
 
 # Dataloaders
@@ -65,7 +103,7 @@ class TabularClassificationModel(torch.nn.Module):
         x = self.softmax(x)
         return x
 
-# Train the model. Feel free to replace this with your own training pipeline. 
+# Train the model. Feel free to replace this with your own training pipeline.
 trainer = BasicTrainer(
     model = TabularClassificationModel(X_train.shape[1], len(np.unique(y_train))),
     loss_fn = torch.nn.CrossEntropyLoss(),
@@ -76,9 +114,11 @@ trainer = BasicTrainer(
 )
 trainer.fit(10)
 ```
+
 ## More Complex Image Classification Example
 
 Import openML libraries
+
 ```python
 # openml imports
 import openml
@@ -115,7 +155,7 @@ transform = Compose(
 
 ### Configure the Data Module and Choose a Task
 """
-- Make sure the data is present in the `file_dir` directory, and the `filename_col` is correctly set along with this column correctly pointing to where your data is stored. 
+- Make sure the data is present in the `file_dir` directory, and the `filename_col` is correctly set along with this column correctly pointing to where your data is stored.
 """
 data_module = op.OpenMLDataModule(
     type_of_data="image",
@@ -173,6 +213,38 @@ trainer.export_to_netron()
 """
 trainer.plot_all_metrics()
 openml.config.apikey = ''
-run = op.add_experiment_info_to_run(run=run, trainer=trainer) 
+run = op.add_experiment_info_to_run(run=run, trainer=trainer)
 run.publish()
 ```
+
+## Docker Setup
+
+For easy setup and consistent environment, we provide a Docker configuration:
+
+```bash
+# Clone the repository
+git clone https://github.com/openml/openml-pytorch.git
+cd openml-pytorch
+
+# Build and start the container
+docker-compose up -d --build
+
+# Run tests to verify the setup
+docker-compose exec openml-pytorch python -m pytest test/
+
+# Access the container shell
+docker-compose exec openml-pytorch bash
+
+# Run a Python script inside the container
+docker-compose exec openml-pytorch python your_script.py
+
+# Stop the container when done
+docker-compose down
+```
+
+### Docker Features
+
+- Pre-configured with all dependencies
+- Jupyter Notebook support at `http://localhost:8888`
+- TensorBoard support at `http://localhost:6006`
+- Persistent OpenML cache between container restarts
