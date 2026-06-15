@@ -2,7 +2,7 @@
 
 Pytorch extension for [openml-python API](https://github.com/openml/openml-python). This library provides a simple way to run your Pytorch models on OpenML tasks. 
 
-For a more native experience, PyTorch itself provides OpenML integrations for some tasks. You can find more information [here](<Integrations of OpenML in PyTorch.md>).
+For a more native experience, PyTorch itself provides OpenML integrations for some tasks. You can find more information [here](https://github.com/openml/openml-pytorch/blob/main/docs/Integrations%20of%20OpenML%20in%20PyTorch.md).
 
 ## Installation Instructions:
 
