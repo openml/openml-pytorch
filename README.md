@@ -226,6 +226,9 @@ For easy setup and consistent environment, we provide a Docker configuration:
 git clone https://github.com/openml/openml-pytorch.git
 cd openml-pytorch
 
+#To check for any updated lock files
+uv lock
+
 # Build and start the container
 docker-compose up -d --build
 

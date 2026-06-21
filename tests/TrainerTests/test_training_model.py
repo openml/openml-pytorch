@@ -19,14 +19,14 @@ def test_init_sets_correct_config(dummy_data_module):
     trainer = OpenMLTrainerModule(
         experiment_name="test_exp",
         data_module=dummy_data_module,
-        use_tensorboard=False
+        use_csv_logger=False
     )
     assert trainer.experiment_name == "test_exp"
     assert hasattr(trainer.config, "opt")
-    assert trainer.tensorboard_writer is None
+    assert trainer.csv_logger_dir is None
 
 def test_prediction_to_probabilities_valid_input():
-    trainer = OpenMLTrainerModule("test", MagicMock(), use_tensorboard=False)
+    trainer = OpenMLTrainerModule("test", MagicMock(), use_csv_logger=False)
     y_pred = [0, 1, 1, 0]
     classes = [0, 1]
     probs = trainer._prediction_to_probabilities(y_pred, classes)
@@ -34,7 +34,7 @@ def test_prediction_to_probabilities_valid_input():
     assert (probs.sum(axis=1) == 1).all()
 
 def test_prediction_to_probabilities_raises_on_nonlist_classes():
-    trainer = OpenMLTrainerModule("test", MagicMock(), use_tensorboard=False)
+    trainer = OpenMLTrainerModule("test", MagicMock(), use_csv_logger=False)
     with pytest.raises(ValueError):
         trainer._prediction_to_probabilities([0, 1], np.array([0, 1]))
 
@@ -42,5 +42,5 @@ def test_add_callbacks_adds_custom_callbacks(dummy_data_module):
     class CustomCallback:
         def __init__(self): self._order = 1
     cb = CustomCallback()
-    trainer = OpenMLTrainerModule("test", dummy_data_module, callbacks=[cb], use_tensorboard=False)
+    trainer = OpenMLTrainerModule("test", dummy_data_module, callbacks=[cb], use_csv_logger=False)
     assert cb in trainer.cbfs

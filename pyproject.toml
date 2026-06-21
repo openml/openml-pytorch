@@ -18,7 +18,6 @@ dependencies = [
     "pandas>=3.0.0",
     "pytest>=9.0.2",
     "scikit-learn>=1.8.0",
-    "tensorboard>=2.20.0",
     "torch>=2.10.0",
     "torchvision>=0.25.0",
     "tqdm>=4.67.3",

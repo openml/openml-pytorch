@@ -1,0 +1,2 @@
+Epoch,Train Loss,Valid Loss,Train accuracy,Valid accuracy,Learning Rate
+0,0.6210856496551891,0.6132617526584201,0.6901234984397888,0.699999988079071,0.0003

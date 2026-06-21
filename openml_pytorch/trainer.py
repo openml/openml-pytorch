@@ -28,7 +28,6 @@ import torch.utils
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard.writer import SummaryWriter
 from torchvision.transforms import Compose, Lambda, Resize, ToPILImage, ToTensor
 from tqdm import tqdm
 
@@ -563,7 +562,7 @@ class OpenMLTrainerModule:
         loss_fn: Callable = torch.nn.CrossEntropyLoss,
         loss_fn_kwargs: dict = {},
         callbacks: List[Callback] = [],
-        use_tensorboard: bool = True,
+        use_csv_logger: bool = True,
         metrics: List[Callable] = [],
         scheduler=torch.optim.lr_scheduler.CosineAnnealingLR,
         scheduler_kwargs: dict = {"T_max": 50, "eta_min": 1e-6},
@@ -590,15 +589,12 @@ class OpenMLTrainerModule:
         self.logger: logging.Logger = logging.getLogger(__name__)
 
         self.user_defined_measures = OrderedDict()
-        # Tensorboard support
+        # CSV Logger support
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.tensorboard_writer = None
+        self.csv_logger_dir = None
 
-        if use_tensorboard:
-            self.tensorboard_writer = SummaryWriter(
-                comment=experiment_name,
-                log_dir=f"tensorboard_logs/{experiment_name}/{timestamp}",
-            )
+        if use_csv_logger:
+            self.csv_logger_dir = f"csv_logs/{experiment_name}/{timestamp}"
 
         self.loss = 0
         self.training_state = True
@@ -613,8 +609,8 @@ class OpenMLTrainerModule:
             partial(AvgStatsCallback, self.metrics),
             partial(PutDataOnDeviceCallback, self.config.device),
         ]
-        if self.tensorboard_writer is not None:
-            self.cbfs.append(partial(TensorBoardCallback, self.tensorboard_writer))
+        if self.csv_logger_dir is not None:
+            self.cbfs.append(partial(CSVLoggerCallback, self.csv_logger_dir, experiment_name))
 
         self.add_callbacks()
 

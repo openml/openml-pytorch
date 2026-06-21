@@ -50,7 +50,7 @@ from .training_callbacks import (
 )
 from .recording import Recorder, AvgStats, AvgStatsCallback
 from .device_callbacks import PutDataOnDeviceCallback
-from .tensorboard import TensorBoardCallback
+from .csv_logger import CSVLoggerCallback
 
 __all__ = [
     "Callback",
@@ -70,7 +70,7 @@ __all__ = [
     "AvgStats",
     "AvgStatsCallback",
     "PutDataOnDeviceCallback",
-    "TensorBoardCallback",
+    "CSVLoggerCallback",
     "listify",
     "camel2snake",
 ]

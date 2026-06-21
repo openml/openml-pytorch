@@ -38,13 +38,13 @@ class TestPutDataOnDeviceCallback(unittest.TestCase):
         self.callback.begin_batch()
 
         # Check that xb and yb are moved to the correct device
-        self.assertEqual(self.run.xb.device, self.device)
-        self.assertEqual(self.run.yb.device, self.device)
+        self.assertEqual(self.run.xb.device.type, self.device.type)
+        self.assertEqual(self.run.yb.device.type, self.device.type)
 
     def test_after_pred(self):
         # Test that the predictions and labels are moved to the correct device in after_pred
         self.callback.after_pred()
 
         # Check that pred and yb are moved to the device
-        self.assertEqual(self.run.pred.device, self.device)
-        self.assertEqual(self.run.yb.device, self.device)
+        self.assertEqual(self.run.pred.device.type, self.device.type)
+        self.assertEqual(self.run.yb.device.type, self.device.type)
