@@ -41,18 +41,13 @@ def test_begin_epoch_increments_epochs(recorder):
 def test_after_batch_records_lr_loss(recorder):
     recorder.begin_fit()
     recorder.after_batch()
-    dummy_cb = AvgStatsCallback(metrics=[lambda pred, yb: (pred == yb).float().mean()])
-    dummy_cb.train_stats.count = 1
-
-    dummy_cb.train_stats.tot_loss = torch.tensor(1)
-    dummy_cb.train_stats.tot_mets = [torch.tensor(1)]
-    dummy_cb.train_stats.metrics[0].__name__ = "accuracy"
-
-    dummy_cb.valid_stats.count = 1
-
-    dummy_cb.valid_stats.tot_loss = torch.tensor(1)
-    dummy_cb.valid_stats.tot_mets = [torch.tensor(1)]
-    dummy_cb.valid_stats.metrics[0].__name__ = "accuracy"
+    dummy_cb = AvgStatsCallback(metrics=[accuracy])
+    dummy_cb.begin_epoch()
+    for stats in (dummy_cb.train_stats, dummy_cb.valid_stats):
+        stats.count = 2
+        stats.tot_loss = torch.tensor(2)
+        stats.predictions = [torch.tensor([[0.0, 1.0], [1.0, 0.0]])]
+        stats.targets = [torch.tensor([1, 0])]
     recorder.run.cbs = [dummy_cb]
     recorder.current_epoch = 1
     recorder.after_epoch()
@@ -61,6 +56,7 @@ def test_after_batch_records_lr_loss(recorder):
         "train": torch.tensor(1.0),
         "valid": torch.tensor(1.0),
     }
+    assert [float(value) for value in dummy_cb.train_stats.all_stats] == [2.0, 2.0]
 
 
 def test_get_metrics_history_returns_dict(recorder):

@@ -1,7 +1,18 @@
 from .callback import Callback
+from functools import partial
 import matplotlib.pyplot as plt
 from .helper import listify
 import torch
+
+
+def get_metric_name(metric):
+    if isinstance(metric, partial):
+        keyword_arguments = "_".join(
+            f"{name}={value}" for name, value in sorted((metric.keywords or {}).items())
+        )
+        metric_name = metric.func.__name__
+        return f"{metric_name}_{keyword_arguments}" if keyword_arguments else metric_name
+    return metric.__name__ or str(metric)
 
 
 class Recorder(Callback):
@@ -16,7 +27,7 @@ class Recorder(Callback):
         self.lrs = [[] for _ in self.opt.param_groups]
         self.losses = []
         self.metrics = (
-            {metric.__name__: [] for metric in self.metrics}
+            {get_metric_name(metric): [] for metric in self.metrics}
             if hasattr(self, "metrics")
             else {}
         )
@@ -51,9 +62,7 @@ class Recorder(Callback):
             for cb in self.run.cbs:
                 if isinstance(cb, AvgStatsCallback):
                     for i, metric_fn in enumerate(cb.train_stats.metrics):
-                        metric_name = metric_fn.__name__
-                        if metric_name == "":
-                            metric_name = str(metric_fn)
+                        metric_name = get_metric_name(metric_fn)
                         if metric_name not in self.metrics:
                             self.metrics[metric_name] = []
                         # Store both train and valid metrics
@@ -259,31 +268,44 @@ class AvgStats:
 
     def reset(self):
         self.tot_loss, self.count = 0.0, 0
-        self.tot_mets = [0.0] * len(self.metrics)
+        self.predictions, self.targets = [], []
+        self._cached_avg_stats = None
 
     @property
     def all_stats(self):
-        return [self.tot_loss.item()] + self.tot_mets
+        return [self.tot_loss.item()] + [
+            score * self.count for score in self.avg_stats[1:]
+        ]
 
     @property
     def avg_stats(self):
-        return [o / self.count for o in self.all_stats]
+        if self._cached_avg_stats is None:
+            averages = [self.tot_loss.item() / self.count]
+            if self.metrics:
+                predictions = torch.cat(self.predictions)
+                targets = torch.cat(self.targets)
+                averages.extend(metric(predictions, targets) for metric in self.metrics)
+            self._cached_avg_stats = averages
+        return self._cached_avg_stats
 
     def accumulate(self, run):
         bn = run.xb.shape[0]
         self.tot_loss += run.loss * bn
         self.count += bn
-        for i, m in enumerate(self.metrics):
-            self.tot_mets[i] += m(run.pred, run.yb) * bn
+        self._cached_avg_stats = None
+        if self.metrics:
+            self.predictions.append(run.pred.detach().cpu())
+            self.targets.append(run.yb.detach().cpu())
 
     def __repr__(self):
         if not self.count:
             return ""
         phase = "train" if self.in_train else "valid"
-        try:
-            return f"{phase} loss: {self.avg_stats[0]:.4f} | accuracy: {self.avg_stats[1]:.4f} | other metrics: {self.avg_stats[2:]}"
-        except IndexError:
-            return f"{phase} loss: {self.avg_stats[0]:.4f} | other metrics: {self.avg_stats[1:]}"
+        averages = self.avg_stats
+        output = f"{phase} loss: {averages[0]:.4f}"
+        for metric, value in zip(self.metrics, averages[1:]):
+            output += f" | {get_metric_name(metric)}: {float(value):.4f}"
+        return output
 
 
 class AvgStatsCallback(Callback):

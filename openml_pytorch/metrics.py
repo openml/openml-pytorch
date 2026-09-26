@@ -4,6 +4,7 @@ It includes functions to compute the accuracy, top-k accuracy of model predictio
 """
 
 import torch
+from sklearn import metrics as sklearn_metrics
 
 
 def accuracy(out, yb):
@@ -61,3 +62,28 @@ def f1_score(out, yb):
     f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
 
     return f1
+
+
+def roc_auc(out, yb, average="macro"):
+    """
+    Computes ROC AUC from binary or multiclass model logits.
+
+    Args:
+        out (torch.Tensor): Class logits of shape (num_samples, num_classes).
+        yb (torch.Tensor): Integer class labels of shape (num_samples,).
+        average (str): Multiclass averaging method, usually "macro" or "weighted".
+
+    Returns:
+        float: ROC AUC. With macro averaging, a missing class yields nan.
+    """
+    probabilities = torch.softmax(out.detach().cpu().double(), dim=1).numpy()
+    labels = yb.cpu().numpy()
+    if probabilities.shape[1] == 2:
+        return sklearn_metrics.roc_auc_score(labels, probabilities[:, 1])
+    return sklearn_metrics.roc_auc_score(
+        labels,
+        probabilities,
+        multi_class="ovr",
+        average=average,
+        labels=list(range(probabilities.shape[1])),
+    )
